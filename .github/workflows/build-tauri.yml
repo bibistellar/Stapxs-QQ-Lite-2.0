@@ -12,8 +12,10 @@ jobs:
     build:
         runs-on: ${{ matrix.os }}
         strategy:
+            # 单个平台失败不影响其它平台继续构建、发布
+            fail-fast: false
             matrix:
-                os: [windows-2022, ubuntu-22.04, ubuntu-22.04-arm]
+                os: [windows-2022, ubuntu-22.04, ubuntu-22.04-arm, macos-14, macos-13]
 
         steps:
             - name: 安装构建依赖
@@ -51,6 +53,14 @@ jobs:
                   profile: minimal
                   override: true
 
+            # macOS 运行器的宿主架构即目标架构，显式补一次以防工具链缺失
+            - name: 添加 macOS 构建目标
+              if: matrix.os == 'macos-14'
+              run: rustup target add aarch64-apple-darwin
+            - name: 添加 macOS 构建目标
+              if: matrix.os == 'macos-13'
+              run: rustup target add x86_64-apple-darwin
+
             - name: 检查 Tauri 环境
               run: yarn tauri info
 
@@ -63,6 +73,14 @@ jobs:
             - name: 构建 Tauri 应用
               if: matrix.os == 'ubuntu-22.04-arm'
               run: yarn build:tauri -t aarch64-unknown-linux-gnu -b appimage,deb
+            # macOS 使用 tauri.conf.json 中的 ad-hoc 签名（signingIdentity: "-"），
+            # 无需 Apple 开发者证书；未签名/未公证，用户首次打开需右键 → 打开
+            - name: 构建 Tauri 应用
+              if: matrix.os == 'macos-14'
+              run: yarn build:tauri -t aarch64-apple-darwin -b dmg
+            - name: 构建 Tauri 应用
+              if: matrix.os == 'macos-13'
+              run: yarn build:tauri -t x86_64-apple-darwin -b dmg
 
             - name: 准备产物目录
               if: matrix.os != 'windows-2022'

@@ -37,6 +37,8 @@ jobs:
 
     build-docker:
         name: 构建 Docker 版本
+        # 仅上游仓库发布 Docker 镜像；fork 没有 DOCKER_PASSWORD，跳过以免无谓失败
+        if: github.repository_owner == 'Stapxs'
         needs:
             - init
             - build-root-web
@@ -50,6 +52,8 @@ jobs:
     # ==================== 构建 Github Pages 版本 =====================
     build-pages:
         name: 构建 Github Pages 版本
+        # 仅上游仓库部署 Pages；fork 未开启 gh-pages，跳过以免无谓失败
+        if: github.repository_owner == 'Stapxs'
         runs-on: ubuntu-latest
         needs: init
         steps:
@@ -106,6 +110,9 @@ jobs:
     release:
         name: 发布构建结果
         runs-on: ubuntu-latest
+        # 使用内置 GITHUB_TOKEN 创建 Release 时需要写权限
+        permissions:
+            contents: write
         needs:
             - init
             - build-root-web
@@ -133,10 +140,22 @@ jobs:
                       `这是一个自动构建版本，由 GitHub Actions 自动构建并发布。`
                       ## 更新内容
                       ${{ github.event.head_commit.message }}
+                      ## 下载说明
+                      - Windows：`.exe`（NSIS 安装包）
+                      - Linux：`.AppImage` / `.deb`（x86_64 与 aarch64）
+                      - macOS：`_aarch64.dmg`（Apple Silicon）、`_x64.dmg`（Intel）
+
+                      > [!NOTE]
+                      > macOS 版本为 ad-hoc 签名、未经 Apple 公证，首次打开会提示「已损坏」或「无法验证开发者」。
+                      > 请在终端执行以下命令解除隔离标记后即可正常打开：
+                      > ```bash
+                      > xattr -dr com.apple.quarantine "/Applications/Stapxs QQ Lite.app"
+                      > ```
                       ## 自动构建信息
                       - 构建时间：${{ github.event.head_commit.timestamp }}
                       - 构建提交：${{ github.event.head_commit.id }}
                       - 构建分支：${{ github.event.head_commit.tree_id }}
                   draft: false
                   prerelease: false
-                  token: ${{ secrets.ACCESS_TOKEN }}
+                  # 上游用 PAT（可触发下游工作流）；fork 无此 secret 时回退到内置 GITHUB_TOKEN
+                  token: ${{ secrets.ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
