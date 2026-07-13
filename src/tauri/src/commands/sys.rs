@@ -610,6 +610,23 @@ pub fn sys_flush_on_message() -> String {
     return "".to_string();
 }
 
+/// 更新未读消息角标
+/// - Dock 图标红色数字角标（macOS / Linux Unity）
+/// - macOS 菜单栏托盘图标旁显示未读数字
+#[command]
+pub fn sys_update_badge(app: AppHandle, data: i64) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_badge_count(if data > 0 { Some(data) } else { None });
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(tray) = app.tray_by_id(crate::TRAY_ID) {
+        // 注意：tray-icon 0.21 在 macOS 上 set_title(None) 是空操作，不会清掉
+        // 已显示的文字；必须显式传入空字符串才能把菜单栏数字清空。
+        let title = if data > 0 { data.to_string() } else { String::new() };
+        let _ = tray.set_title(Some(title));
+    }
+}
+
 #[command]
 pub fn sys_flush_friend_search() -> String {
     return "".to_string();

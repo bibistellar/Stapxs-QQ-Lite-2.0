@@ -670,6 +670,7 @@ function changeChat(data: BaseChatInfoElem) {
     chatStore.mergeMessageList = undefined // 清空合并转发缓存
     uiStore.canLoadHistory = true // 重置终止加载标志
     uiStore.loadHistoryFail = false // 重置加载失败标志
+    uiStore.nowGetHistory = false // 重置分页加载标志，避免它卡在 true 导致切换会话不重新拉取历史
     if (data.type == 'group') {
         // 获取自己在群内的资料
         Connector.send(
@@ -1029,6 +1030,13 @@ onMounted(() => {
                     })
                 })
                 backend.call(undefined, 'sys:flushOnMessage', false, list)
+                // 未读消息角标：直接统计存在未读标记的会话数，
+                // 不依赖会漂移的 newMsgCount 计数器（读完后会归零、清除角标）
+                let unread = 0
+                contactStore.baseOnMsgList.forEach((item) => {
+                    if (item.new_msg) unread++
+                })
+                backend.call(undefined, 'sys:updateBadge', false, unread)
             }
 
             // 刷新列表

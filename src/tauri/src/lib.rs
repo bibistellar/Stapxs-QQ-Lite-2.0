@@ -18,6 +18,12 @@ use user_notify::{get_notification_manager, NotificationCategory, NotificationCa
 
 pub static PROXY_PORT: OnceCell<u16> = OnceCell::new();
 
+/// 托盘图标 ID（用于在命令中按 ID 取回托盘以更新未读角标）
+pub const TRAY_ID: &str = "main-tray";
+/// macOS 菜单栏模板图标（44x44 RGBA，仅 alpha 通道生效，系统自动反色）
+#[cfg(target_os = "macos")]
+const TRAY_TEMPLATE_RGBA: &[u8] = include_bytes!("../icons/tray-template.rgba");
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Tauri 应用程序入口
 pub fn run() {
@@ -187,8 +193,7 @@ pub fn run() {
                 }
             });
 
-            // 创建托盘
-            #[cfg(not(target_os = "macos"))]
+            // 创建托盘（含 macOS 菜单栏图标）
             build_tray(app.handle().clone());
 
             // 注册本地文件协议
@@ -226,6 +231,7 @@ pub fn run() {
             commands::sys::sys_get_api,
             commands::sys::sys_download,
             commands::sys::sys_flush_on_message,
+            commands::sys::sys_update_badge,
             commands::sys::sys_flush_friend_search,
             commands::sys::sys_select_folder,
             commands::sys::sys_get_local_emojis,
@@ -414,7 +420,6 @@ fn create_window(app: &mut tauri::App) -> tauri::Result<tauri::WebviewWindow> {
     Ok(window)
 }
 
-#[cfg(not(target_os = "macos"))]
 fn build_tray(app: AppHandle) -> TrayIcon {
     let show = MenuItem::with_id(
         &app, "show", "显示", true, None::<&str>).unwrap();
@@ -424,12 +429,26 @@ fn build_tray(app: AppHandle) -> TrayIcon {
     let menu = Menu::with_items(
         &app, &[&show, &quit]).unwrap();
 
-    let tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+    // macOS 菜单栏：单击即弹出菜单（符合原生习惯）；
+    // 其它平台保留双击显示窗口、右键弹菜单的行为
+    #[cfg(target_os = "macos")]
+    let menu_on_left_click = true;
+    #[cfg(not(target_os = "macos"))]
+    let menu_on_left_click = false;
+
+    let builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .show_menu_on_left_click(false)
-        .build(&app)
-        .unwrap();
+        .show_menu_on_left_click(menu_on_left_click);
+
+    // macOS 使用单色模板图标（系统按浅/深色菜单栏自动反色），其它平台沿用应用图标
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .icon(tauri::image::Image::new(TRAY_TEMPLATE_RGBA, 44, 44))
+        .icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.icon(app.default_window_icon().unwrap().clone());
+
+    let tray = builder.build(&app).unwrap();
 
     tray.on_tray_icon_event(move |_, event| {
         if let TrayIconEvent::DoubleClick { .. } = event {
