@@ -1,0 +1,26 @@
+# SnowLuma 消息结构声明
+# https://github.com/botuniverse/onebot-11
+# PS：解析中可以使用 jsonpath，左斜杠开头则表示为当前位置
+
+# Bot 名称
+name: SnowLuma
+# SnowLuma 是标准的 OneBot v11 实现，绝大部分结构与 Lagrange.OneBot 一致
+redirect: Lagrange.OneBot
+
+# 群、好友列表
+# PS：和 Lagrange 的区别在于 SnowLuma 的好友项是平铺的（user_id、nickname、remark），
+#     没有嵌套的 group 字段，所以不存在好友分组
+user_list:
+    name: get_friend_list|get_group_list
+    source: $.data[*]
+    list:
+        group_id: /group_id
+        group_name: /group_name
+        member_count: /member_count
+        admin_flag: null
+
+        class_id: null
+        class_name: null
+        user_id: /user_id
+        nickname: /nickname
+        remark: /remark
