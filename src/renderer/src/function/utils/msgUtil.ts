@@ -58,11 +58,15 @@ export function getMsgData(
                                         nameKey = name
                                         regexKey = key
                                     }
-                                    itemObj[key] = jp.query(
+                                    const queryBack = jp.query(
                                         item,
                                         replaceJPValue(nameKey),
                                     )
-                                    if (regexKey != null) {
+                                    // 查不到内容时给 undefined 而不是空数组
+                                    // PS：空数组是 truthy，会被判断为“这个字段有值”
+                                    itemObj[key] =
+                                        queryBack.length > 0? queryBack: undefined
+                                    if (itemObj[key] != undefined && regexKey != null) {
                                         const regex = new RegExp(regexKey)
                                         const match = itemObj[key].match(regex)
                                         if (match != null) {

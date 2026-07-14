@@ -172,12 +172,12 @@ export function reloadUsers() {
         contactStore.userList = []
         let friendName = 'get_friend_list'
         let groupName = 'get_group_list'
-        if (authStore.jsonMap.user_list?.name) {
+        if (authStore.jsonMap?.user_list?.name) {
             friendName = authStore.jsonMap.user_list.name.split('|')[0]
             groupName = authStore.jsonMap.user_list.name.split('|')[1]
         } else if (
-            authStore.jsonMap.friend_list?.name &&
-            authStore.jsonMap.group_list?.name
+            authStore.jsonMap?.friend_list?.name &&
+            authStore.jsonMap?.group_list?.name
         ) {
             friendName = authStore.jsonMap.friend_list.name
             groupName = authStore.jsonMap.group_list.name
@@ -1170,6 +1170,9 @@ export function BackendRequest(type: 'GET' | 'POST', url: string,
     })
 }
 
+// 未知实现（如自研的 OneBot 服务端）回退使用的映射表，需与 msg.ts 里的默认映射表保持一致
+const DEFAULT_JSON_MAP = 'Lagrange.OneBot.yaml'
+
 /**
 * 加载数据解析映射表（JSON Path）
 * @param name 配置名称
@@ -1210,10 +1213,19 @@ export function loadJsonMap(name: string) {
                     logger.system('非常抱歉开发者，已帮阁下将映射表重定向加载为 ：' + msgPath?.name + ' （慌张）')
                 }
             } else {
-                logger.system('开发者，没有找到你需要的映射表……')
+                // 没有对应实现的映射表时回退到默认映射表
+                // PS：不能让 jsonMap 保持 undefined，否则读取它的地方（如 reloadUsers）会直接抛错，
+                //     表现为登录成功但用户列表一直是空的
+                logger.system('开发者，没有找到你需要的映射表……将使用默认映射表。')
+                const defaultKey = Object.keys(msgPathList).find((key) => {
+                    return key.includes(DEFAULT_JSON_MAP)
+                })
+                if (defaultKey) {
+                    msgPath = (msgPathList[defaultKey] as any).default
+                }
             }
             const authStore = useAuthStore()
-            authStore.jsonMap = msgPath
+            authStore.jsonMap = msgPath ?? {}
         } catch (ex) {
             logger.system('很抱歉开发者，映射表加载失败 ……' + ex)
         }

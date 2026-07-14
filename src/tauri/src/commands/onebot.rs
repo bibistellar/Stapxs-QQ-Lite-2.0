@@ -27,6 +27,18 @@ pub async fn onebot_connect(
     }
 
     info!("正在连接到: {}", address);
+
+    // 地址必须带 ws(s) 协议，否则 http::Uri 只会给出一个看不懂的 “invalid format”
+    if !address.starts_with("ws://") && !address.starts_with("wss://") {
+        let message = format!("连接地址缺少 ws:// 或 wss:// 协议：{}", address);
+        error!("{}", message);
+        let mut payload = HashMap::new();
+        payload.insert("code", 1000.to_string());
+        payload.insert("message", message.clone());
+        let _ = app_handle.emit("onebot:onclose", payload);
+        return Err(message);
+    }
+
     let url = format!("{}?access_token={}", address, token);
     let address = address.to_string();
     let token = token.to_string();

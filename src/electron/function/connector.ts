@@ -29,7 +29,12 @@ export class Connector {
     }
 
     connect(url: string, token: string) {
-        if (url.indexOf('ws://') < 0 && url.indexOf('wss://') < 0) {
+        // PS：http(s) 地址要转换而不是拼接，否则会得到 wss://http://... 这种非法地址
+        if (url.startsWith('https://')) {
+            url = 'wss://' + url.slice('https://'.length)
+        } else if (url.startsWith('http://')) {
+            url = 'ws://' + url.slice('http://'.length)
+        } else if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
             url = 'wss://' + url
         }
         // 确保 URL 包含路径部分，避免部分服务器因 HTTP 请求路径为空而返回 400

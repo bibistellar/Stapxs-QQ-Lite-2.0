@@ -1497,7 +1497,7 @@ function saveUser(msg: { [key: string]: any }, type: string) {
     // 如果获取次数大于 0 并且是双数，刷新一下历史会话
     if (listLoadTimes > 0 && listLoadTimes % 2 == 0) {
         // 获取最近的会话
-        if (authStore.jsonMap.recent_contact)
+        if (authStore.jsonMap?.recent_contact)
             Connector.send(
                 authStore.jsonMap.recent_contact.name,
                 {},
@@ -1505,7 +1505,7 @@ function saveUser(msg: { [key: string]: any }, type: string) {
             )
     }
     // 如果是分离式的好友列表，继续获取分类信息
-    if (type == 'friend' && authStore.jsonMap.friend_category) {
+    if (type == 'friend' && authStore.jsonMap?.friend_category) {
         Connector.send(
             authStore.jsonMap.friend_category.name,
             {},

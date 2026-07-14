@@ -91,6 +91,38 @@ function withWebSocketProtocol(address: string, secure: boolean) {
     return `${secure ? WSS_PROTOCOL : WS_PROTOCOL}${address}`
 }
 
+// 本地/局域网地址（IPv4、IPv6、localhost），这类地址默认使用明文 ws
+const LOCAL_ADDRESS_REG =
+    /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?([/?#]|$)/i
+
+/**
+ * 把 http(s) 协议的地址转换为 ws(s)
+ * PS：用户经常会直接粘贴 OneBot 的 http 地址，此时不能把它当作“没有协议”再拼一个 ws://，
+ *     否则会得到 ws://https://... 这种非法地址（浏览器会报 scheme 错误）
+ */
+function normalizeProtocol(address: string) {
+    if (address.startsWith('https://'))
+        return WSS_PROTOCOL + address.slice('https://'.length)
+    if (address.startsWith('http://'))
+        return WS_PROTOCOL + address.slice('http://'.length)
+    return address
+}
+
+/**
+ * 补全缺失的 ws(s) 协议
+ * PS：后端连接模式下地址会被原样交给后端解析（Tauri 使用 http::Uri），
+ *     缺少协议会直接解析失败，所以发给后端前必须补全
+ */
+function withDefaultProtocol(address: string) {
+    if (
+        address.startsWith(WS_PROTOCOL) ||
+        address.startsWith(WSS_PROTOCOL)
+    ) {
+        return address
+    }
+    return withWebSocketProtocol(address, !LOCAL_ADDRESS_REG.test(address))
+}
+
 class TimeoutError extends Error {
     echo: string
     constructor(echo: string) {
@@ -123,6 +155,9 @@ export class Connector {
 
         logger.add(LogType.WS, '当前处于 ALL 日志模式。连接器将输出全部收发消息 ……')
 
+        // 把 http(s) 地址转换为 ws(s)
+        address = normalizeProtocol(address)
+
         // 确保 address 包含路径部分，避免部分服务器因 HTTP 请求路径为空而返回 400
         const withoutProtocol = address.replace(/^(wss?|https?):(\/\/)/, '')
         if (!withoutProtocol.includes('/')) {
@@ -132,8 +167,10 @@ export class Connector {
         // Electron 默认使用后端连接模式
         if (!backend.isWeb()) {
             logger.add(LogType.WS, '使用后端连接模式')
+            // PS：后端拿到的必须是带协议的完整地址，否则无法解析
+            const backendAddress = withDefaultProtocol(address)
             backend.call('Onebot', 'onebot:connect', false,
-                backend.isDesktop() ?  { address: address, token: token, } : { url: appendAccessToken(address, token) })
+                backend.isDesktop() ?  { address: backendAddress, token: token, } : { url: appendAccessToken(backendAddress, token) })
             return
         }
 
@@ -402,9 +439,9 @@ export class Connector {
         // 组建信息
         const echo = uuid()
         const authStore = useAuthStore()
-        const apiMap = authStore.jsonMap[api]
+        const apiMap = authStore.jsonMap?.[api]
         if (!apiMap) {
-            logger.debug(`${authStore.jsonMap.name} 未适配 API ${api}`)
+            logger.debug(`${authStore.jsonMap?.name} 未适配 API ${api}`)
             return undefined
         }
 

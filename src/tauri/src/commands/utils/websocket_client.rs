@@ -37,7 +37,8 @@ impl WebSocketClient {
                 eprintln!("warning: failed to install rustls ring default provider: {:?}", e);
             }
         });
-        let timeout_duration = Duration::from_secs(5);
+        // PS：走 CDN / 反代的 wss 地址，DNS + TCP + TLS + 升级握手叠起来可能超过 5 秒
+        let timeout_duration = Duration::from_secs(15);
 
         let on_open = Arc::new(Mutex::new(on_open));
         let on_message = Arc::new(Mutex::new(on_message));
