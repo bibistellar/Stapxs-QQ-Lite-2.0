@@ -12,9 +12,9 @@
   <p align="center">
     An unofficial web QQ client compatible with OneBot
     <br />
-    <a href="https://stapxs.github.io/Stapxs-QQ-Lite-2.0/" target="blank"><strong>🌎 Visit DEMO</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases" target="blank"><strong>📦️ Download</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/new?assignees=Stapxs&labels=%3Abug%3A+%E9%94%99%E8%AF%AF&template=----.md&title=%5B%E9%94%99%E8%AF%AF%5D" target="blank"><strong>💬 Report Issues</strong></a>
+    <a href="https://bibistellar.github.io/Stapxs-QQ-Lite-2.0/" target="blank"><strong>🌎 Visit DEMO</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases" target="blank"><strong>📦️ Download</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues/new" target="blank"><strong>💬 Report Issues</strong></a>
     <br />
     <br />
     <strong>This web application is for learning and communication purposes only. Please do not use it for other purposes.</strong><br>
@@ -61,11 +61,11 @@ Stapxs QQ Lite requires a QQ Bot backend to provide services. Since deploying a 
 
 ### > Access the Web Page
 
-This repository has GitHub Pages enabled, and all code committed to the main branch will be automatically built and published. You can directly visit [🌎 this page](https://stapxs.github.io/Stapxs-QQ-Lite-2.0) to use the pre-built and deployed online version.
+This repository has GitHub Pages enabled, and all code committed to the main branch will be automatically built and published. You can directly visit [🌎 this page](https://bibistellar.github.io/Stapxs-QQ-Lite-2.0) to use the pre-built and deployed online version.
 
 ### > Install the Client
 
-In addition to using the build page from this repository directly, you can also download the **slightly** more feature-rich client version packaged with Electron. Visit [📦️ here](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases) to view the release list.
+In addition to using the build page from this repository directly, you can also download the **slightly** more feature-rich client version packaged with Electron. Visit [📦️ here](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) to view the release list.
 
 You can also use a package manager to install it, which makes it easier to update Stapxs QQ Lite without manually downloading from GitHub each time. Visit [💬 here](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/99) to see the currently supported package managers.
 
@@ -78,7 +78,7 @@ Stapxs QQ Lite can also run as a Napcat plugin. Click the quick install button b
 
 ### > Self-Host the Web Page
 
-Stapxs QQ Lite builds Web files with each release. You can find them at [📦️ here](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases), usually named `Stapxs.QQ.Lite-<version>-web.zip`. Download and extract it, then place it on your web server.
+Stapxs QQ Lite builds Web files with each release. You can find them at [📦️ here](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases), usually named `Stapxs.QQ.Lite-<version>-web.zip`. Download and extract it, then place it on your web server.
 
 Not sure how to set up a web server? Stapxs QQ Lite web version has been published to [npm](https://www.npmjs.com/package/ssqq-web)! You can use the npx tool to start it quickly:
 
@@ -90,11 +90,11 @@ npx ssqq-web hostname=127.0.0.1 port=8081
 
 Stapxs QQ Lite natively supports Docker deployment. Use the command
 ``` bash
-docker pull ghcr.io/stapxs/stapxs-qq-lite-2.0:latest
+docker pull ghcr.io/bibistellar/stapxs-qq-lite-2.0:latest
 ```
 to pull the latest image. If you cannot access GHCR or it is too slow, you can use
 ``` bash
-docker pull ghcr.nju.edu.cn/stapxs/stapxs-qq-lite-2.0:latest
+docker pull ghcr.nju.edu.cn/bibistellar/stapxs-qq-lite-2.0:latest
 ```
 to pull the image from a mirror. When running, expose port ```8080``` inside the container externally; port ```80``` can be ignored.
 
@@ -112,14 +112,14 @@ The following are common questions about using QQ Bots and third-party clients. 
 
 ### > I encountered a problem
 
-- If you encounter any issues, feel free to open an [issue](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues)! Bug reports and optimization suggestions are also welcome.
+- If you encounter any issues, feel free to open an [issue](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues)! Bug reports and optimization suggestions are also welcome.
 
 ## 📦️ Building the Application
 
 To standardize references to other repositories, the Stapxs QQ Lite repository includes some Git submodules. This means you need to include submodules when cloning the repository:
 
 ``` bash
-git clone https://github.com/Stapxs/Stapxs-QQ-Lite-2.0.git --recursive
+git clone https://github.com/bibistellar/Stapxs-QQ-Lite-2.0.git --recursive
 ```
 
 If you have already cloned the repository, you can use the following command to initialize the submodules:
@@ -141,7 +141,7 @@ We strongly recommend using your own API Key, as the default Key has a usage lim
 
 ### > Build the Web Page
 
-Stapxs QQ Lite is a Vue-based single-page application. If you want to self-host it on a web server, you need to build it first. You can also go directly to [here](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases) to download pre-built package files.
+Stapxs QQ Lite is a Vue-based single-page application. If you want to self-host it on a web server, you need to build it first. You can also go directly to [here](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) to download pre-built package files.
 
 The following are the commands to build the project. The build output will be placed in the `dist` directory:
 

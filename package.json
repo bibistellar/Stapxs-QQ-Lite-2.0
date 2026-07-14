@@ -3,7 +3,7 @@
   "version": "3.4.1",
   "author": "Stapx Steve [林槐]",
   "description": "一个兼容 OneBot 协议的非官方 QQ 全平台客户端实现。",
-  "homepage": "http://github.com/Stapxs/Stapxs-QQ-Lite-2.0",
+  "homepage": "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0",
   "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
   "type": "module",

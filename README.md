@@ -15,9 +15,9 @@
   <p align="center">
     一个兼容 OneBot 的非官方网页 QQ 客户端
     <br />
-    <a href="https://stapxs.github.io/Stapxs-QQ-Lite-2.0/" target="blank"><strong>🌎 访问 DEMO</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases" target="blank"><strong>📦️ 下载程序</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/new?assignees=Stapxs&labels=%3Abug%3A+%E9%94%99%E8%AF%AF&template=----.md&title=%5B%E9%94%99%E8%AF%AF%5D" target="blank"><strong>💬 反馈问题</strong></a>
+    <a href="https://bibistellar.github.io/Stapxs-QQ-Lite-2.0/" target="blank"><strong>🌎 访问 DEMO</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases" target="blank"><strong>📦️ 下载程序</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues/new" target="blank"><strong>💬 反馈问题</strong></a>
     <br />
     <br />
     <strong>本网页应用仅供学习交流使用，请勿用于其他用途</strong><br>
@@ -64,11 +64,11 @@ Stapxs QQ Lite 需要一个 QQ Bot 后端提供服务。由于 QQ Bot 的部署�
 
 ### > 访问网页
 
-本仓库开启了 GitHub Pages，所有向主分支提交的代码将会自动构建并发布。你可以直接访问 [🌎 这个页面](https://stapxs.github.io/Stapxs-QQ-Lite-2.0) 来使用已构建并部署的在线版本。
+本仓库开启了 GitHub Pages，所有向主分支提交的代码将会自动构建并发布。你可以直接访问 [🌎 这个页面](https://bibistellar.github.io/Stapxs-QQ-Lite-2.0) 来使用已构建并部署的在线版本。
 
 ### > 安装客户端
 
-除了直接使用本仓库的构建页面，你也可以下载使用 Electron 打包的功能**稍稍**更丰富的客户端版本，访问 [📦️ 这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases) 查看版本发布列表。
+除了直接使用本仓库的构建页面，你也可以下载使用 Electron 打包的功能**稍稍**更丰富的客户端版本，访问 [📦️ 这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 查看版本发布列表。
 
 你也可以使用包管理器来安装，这样可以更方便地更新 Stapxs QQ Lite 而无需每次都从 GitHub 手动下载，访问 [💬 这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/99) 查看目前支持的包管理器。
 
@@ -81,7 +81,7 @@ Stapxs QQ Lite 也可以作为 Napcat 的插件运行，点击下面的快速安
 
 ### > 自行部署网页
 
-Stapxs QQ Lite 在版本发布时会构建 Web 文件，你可以在 [📦️ 这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases) 找到它，通常命名为 `Stapxs.QQ.Lite-<版本>-web.zip`，下载后解压并放置到你的网页服务器中即可。
+Stapxs QQ Lite 在版本发布时会构建 Web 文件，你可以在 [📦️ 这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 找到它，通常命名为 `Stapxs.QQ.Lite-<版本>-web.zip`，下载后解压并放置到你的网页服务器中即可。
 
 不会部署网页服务器？Stapxs QQ Lite 网页版已经发布到了 [npm](https://www.npmjs.com/package/ssqq-web)！你可以使用 npx 工具快速启动：
 
@@ -93,11 +93,11 @@ npx ssqq-web hostname=127.0.0.1 port=8081
 
 Stapxs QQ Lite 已经原生支持了 Docker 部署，使用命令
 ``` bash
-docker pull ghcr.io/stapxs/stapxs-qq-lite-2.0:latest
+docker pull ghcr.io/bibistellar/stapxs-qq-lite-2.0:latest
 ```
 来拉取最新的镜像，如果您无法使用或者GHCR速度很慢，可以使用命令
 ``` bash
-docker pull ghcr.nju.edu.cn/stapxs/stapxs-qq-lite-2.0:latest
+docker pull ghcr.nju.edu.cn/bibistellar/stapxs-qq-lite-2.0:latest
 ```
 来从镜像站拉取镜像，使用时请将容器内的```8080```端口对外开放，```80```端口可以忽略。
 ## 💬 提醒和问题
@@ -114,14 +114,14 @@ docker pull ghcr.nju.edu.cn/stapxs/stapxs-qq-lite-2.0:latest
 
 ### > 我遇到了问题
 
-- 如果遇到任何问题，欢迎发起 [issue](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues) 询问！发现 BUG 或有优化建议也欢迎反馈。
+- 如果遇到任何问题，欢迎发起 [issue](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues) 询问！发现 BUG 或有优化建议也欢迎反馈。
 
 ## 📦️ 构建应用
 
 为了规范对其他仓库的引用，Stapxs QQ Lite 仓库包含一些 Git 子模块，这意味着你需要在克隆仓库时包含子模块：
 
 ``` bash
-git clone https://github.com/Stapxs/Stapxs-QQ-Lite-2.0.git --recursive
+git clone https://github.com/bibistellar/Stapxs-QQ-Lite-2.0.git --recursive
 ```
 
 如果你已经克隆了仓库，可以使用以下命令补全子模块：
@@ -143,7 +143,7 @@ yarn install
 
 ### > 构建 Web 页面
 
-Stapxs QQ Lite 是一个基于 Vue 的单页应用，如果你想自行部署到网页服务器需要进行构建。你也可以直接前往 [这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/releases) 下载预构建好的文件包。
+Stapxs QQ Lite 是一个基于 Vue 的单页应用，如果你想自行部署到网页服务器需要进行构建。你也可以直接前往 [这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 下载预构建好的文件包。
 
 以下是构建该项目的命令，构建结果将输出在 `dist` 目录下：
 
