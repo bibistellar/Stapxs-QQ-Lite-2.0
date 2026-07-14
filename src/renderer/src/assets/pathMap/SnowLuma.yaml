@@ -24,3 +24,11 @@ user_list:
         user_id: /user_id
         nickname: /nickname
         remark: /remark
+
+# 消息转义
+# PS：Lagrange 的图片段把地址放在 file 里，所以它的转义是 url <- file；
+#     SnowLuma 遵循 OneBot v11，file 只是文件名（如 xxx.jpg），真正的地址在 url 里，
+#     沿用 Lagrange 的转义会把 url 覆盖成文件名，导致图片无法显示
+message_value:
+    image:
+        url: $.url
