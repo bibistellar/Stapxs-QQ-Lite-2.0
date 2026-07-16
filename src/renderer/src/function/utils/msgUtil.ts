@@ -566,6 +566,81 @@ export function updateLastestHistory(item: UserFriendElem & UserGroupElem) {
     )
 }
 
+// 本地会话持久化 =====================================================
+// PS：SnowLuma 等服务端的 get_recent_contact 恒返回空数组，导致每次启动 / 重连后
+//     会话列表整个丢失。这里把「已经出现在会话列表里的会话」按账号存到本地，下次
+//     启动或重连后据此把会话塞回列表，并从服务端拉取每个会话最新一条消息立即刷新。
+const LOCAL_SESSION_LIMIT = 200
+let saveLocalSessionsTimer: number | undefined = undefined
+
+function readLocalSessionStore(): { [uin: string]: number[] } {
+    const raw = option.get('local_sessions')
+    if (raw && typeof raw === 'object') {
+        return raw as { [uin: string]: number[] }
+    }
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw)
+            if (parsed && typeof parsed === 'object') return parsed
+        } catch {
+            // ignore
+        }
+    }
+    return {}
+}
+
+/**
+ * 把当前会话列表（baseOnMsgList 的键）持久化到本地，按账号区分
+ */
+export function saveLocalSessions() {
+    const contactStore = useContactStore()
+    const authStore = useAuthStore()
+    const uin = authStore.loginInfo?.uin
+    if (uin == undefined) return
+    const ids = [...contactStore.baseOnMsgList.keys()]
+        .filter((id) => Number.isFinite(id) && id > 0)
+        .slice(0, LOCAL_SESSION_LIMIT)
+    const store = readLocalSessionStore()
+    store[String(uin)] = ids
+    option.save('local_sessions', JSON.stringify(store))
+}
+
+/**
+ * 去抖保存，避免每条消息都写一次本地存储
+ */
+export function scheduleSaveLocalSessions() {
+    if (saveLocalSessionsTimer) return
+    saveLocalSessionsTimer = window.setTimeout(() => {
+        saveLocalSessionsTimer = undefined
+        saveLocalSessions()
+    }, 2000)
+}
+
+/**
+ * 启动 / 重连后：根据本地保存的会话，把会话塞回列表并拉取最新一条消息
+ * PS：与 get_recent_contact 的回调走同一套「找用户 → set → 拉最新」逻辑，靠
+ *     baseOnMsgList 去重，因此对返回了真实最近会话的服务端不会产生重复。
+ */
+export function restoreLocalSessions() {
+    const contactStore = useContactStore()
+    const authStore = useAuthStore()
+    const uin = authStore.loginInfo?.uin
+    if (uin == undefined) return
+    const ids = readLocalSessionStore()[String(uin)]
+    if (!Array.isArray(ids)) return
+    ids.forEach((rawId) => {
+        const id = Number(rawId)
+        if (!Number.isFinite(id) || id <= 0) return
+        if (contactStore.baseOnMsgList.get(id) != undefined) return
+        const user = contactStore.userList.find((item) =>
+            Number(item.user_id) === id || Number(item.group_id) === id)
+        if (user) {
+            contactStore.baseOnMsgList.set(id, user)
+            updateLastestHistory(user)
+        }
+    })
+}
+
 function getSessionId(item: UserFriendElem & UserGroupElem) {
     return Number(item.user_id ?? item.group_id)
 }
@@ -645,6 +720,9 @@ export function updateBaseOnMsgList() {
 
     contactStore.onMsgList = onMsgList
     contactStore.groupAssistList = groupAssistList
+
+    // 会话列表有变化，去抖持久化到本地，供下次启动 / 重连时重建
+    scheduleSaveLocalSessions()
 }
 
 /**

@@ -29,6 +29,20 @@ const popInfo = new PopInfo()
 let retry = 0
 let forceCloseReason: string | undefined = undefined
 
+// 断线自动重连状态 =====================================================
+// PS：wantConnected 表示「已经成功连过、期望保持连接」。它只在成功握手后置 true，
+//     在用户主动断开时置 false。掉线重连、唤醒/联网重连都以它为准，这样即便多次
+//     重连失败也能一直沿着退避节奏重试，而不需要用户手动再点一次登录。
+let reconnectTimer: number | undefined = undefined
+let reconnectAttempts = 0
+let wantConnected = false
+let lifecycleHooksBound = false
+let lastReconnectNow = 0
+// 退避上限 30s；每次失败翻倍，成功后归零
+const RECONNECT_MAX_DELAY = 30000
+// 唤醒/联网事件去抖，避免多个事件在同一时刻重复触发重连
+const RECONNECT_NOW_DEBOUNCE = 3000
+
 export let websocket: WebSocket | undefined = undefined
 const WS_PROTOCOL = 'ws' + '://'
 const WSS_PROTOCOL = 'wss' + '://'
@@ -164,6 +178,10 @@ export class Connector {
             address = address + '/'
         }
 
+        // 记录当前连接目标，供唤醒/联网后的自动重连使用
+        login.address = address
+        login.token = token ?? ''
+
         // Electron 默认使用后端连接模式
         if (!backend.isWeb()) {
             logger.add(LogType.WS, '使用后端连接模式')
@@ -258,6 +276,13 @@ export class Connector {
     static onopen(address: string, token: string | undefined) {
         const settingsStore = useSettingsStore()
         logger.add(LogType.WS, '连接成功')
+        // 握手成功：进入「期望保持连接」状态，清空重连退避
+        wantConnected = true
+        reconnectAttempts = 0
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = undefined
+        }
         // 保存登录信息
         Option.save('address', address)
         // 保存密钥
@@ -353,20 +378,27 @@ export class Connector {
                 break // 正常关闭
             case 1006: {
                 // 非正常关闭，尝试重连
-                popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
-                if (login.status) {
-                    this.create(address, token, undefined)
+                if (wantConnected) {
+                    // 曾经连上过：说明是掉线（网络波动 / 服务端重启 / 睡眠唤醒），
+                    // 按退避节奏无限重连，不再需要用户手动重新登录
+                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
+                    this.scheduleReconnect(address, token)
                 } else {
-                    // PS：由于创建连接失败也会触发此事件，所以需要判断是否已经登录
-                    // 尝试使用 ws 连接
+                    // 从未连上过（首次连接失败）：保持原有协议回退逻辑，尝试明文 ws
+                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
                     this.create(address, token, false)
                 }
                 break
             }
             case 1015: {
-                // TLS 错误，尝试使用 ws 连接
+                // TLS 错误
                 popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
-                this.create(address, token, false)
+                if (wantConnected) {
+                    this.scheduleReconnect(address, token)
+                } else {
+                    // 首次连接的 TLS 错误：尝试使用 ws 连接
+                    this.create(address, token, false)
+                }
                 break
             }
             default: {
@@ -393,6 +425,13 @@ export class Connector {
         }
         connectionStore.metaEventTimeoutTriggered = false
         forceCloseReason = undefined
+        // 用户主动断开：停止自动重连
+        wantConnected = false
+        reconnectAttempts = 0
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = undefined
+        }
 
         if(!backend.isWeb()) {
             backend.call('Onebot', 'onebot:close', false)
@@ -426,6 +465,64 @@ export class Connector {
             return
         }
         this.onclose(1006, reason, login.address, login.token)
+    }
+
+    /**
+     * 掉线后按指数退避排期重连（2s、4s、8s…，上限 30s，成功后归零）
+     * PS：只在「曾经连上过」（wantConnected）时启用，避免和首次连接的协议回退冲突。
+     *     Electron 后端掉线时上报的是 code -1 并自行重连，不会走到这里，因此不会重复重连。
+     */
+    static scheduleReconnect(address: string, token: string | undefined) {
+        if (!wantConnected) return
+        if (reconnectTimer) return
+        // PS：onclose 会在 switch 之后才把 login.status 置 false，所以这里不能用
+        //     login.status 作为门槛（此刻它可能还是 true）；实际的连接状态判断放到
+        //     定时器回调里，届时状态已经稳定。
+        const delay = Math.min(
+            RECONNECT_MAX_DELAY,
+            1000 * Math.pow(2, reconnectAttempts),
+        )
+        reconnectAttempts++
+        logger.add(LogType.WS, `连接断开，将在 ${delay / 1000}s 后进行第 ${reconnectAttempts} 次重连 ……`)
+        reconnectTimer = window.setTimeout(() => {
+            reconnectTimer = undefined
+            if (!wantConnected || login.status || login.creating) return
+            this.create(address, token, undefined)
+        }, delay)
+    }
+
+    /**
+     * 立即重连（网络恢复 / 窗口唤醒时调用）
+     * PS：睡眠唤醒后 socket 往往已经静默失效，但不会立刻触发 onclose；此时若还「期望
+     *     保持连接」且当前未连接，就重置退避立即重连，无需等待下一次退避 tick。
+     */
+    static reconnectNow() {
+        if (!wantConnected) return
+        if (login.status || login.creating) return
+        const now = Date.now()
+        if (now - lastReconnectNow < RECONNECT_NOW_DEBOUNCE) return
+        lastReconnectNow = now
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = undefined
+        }
+        reconnectAttempts = 0
+        logger.add(LogType.WS, '检测到网络恢复 / 窗口唤醒，立即尝试重连 ……')
+        this.create(login.address, login.token, undefined)
+    }
+
+    /**
+     * 注册网络/窗口生命周期钩子，用于睡眠唤醒、断网恢复后自动重连（只注册一次）
+     */
+    static registerLifecycleHooks() {
+        if (lifecycleHooksBound) return
+        lifecycleHooksBound = true
+        const trigger = () => this.reconnectNow()
+        window.addEventListener('online', trigger)
+        window.addEventListener('focus', trigger)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') this.reconnectNow()
+        })
     }
 
     /**

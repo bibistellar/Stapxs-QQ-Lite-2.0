@@ -416,6 +416,8 @@ export function updateMenu(config: { parent: string, id: string; action: string;
 export function createIpc() {
     const contactStore = useContactStore()
     const uiStore = useUIStore()
+    // 注册网络/窗口生命周期钩子：睡眠唤醒、断网恢复后自动重连
+    Connector.registerLifecycleHooks()
     // 服务发现
     backend.addListener(undefined, 'sys:serviceFound', (event, data) => {
         const info = data ?? event.payload

@@ -26,6 +26,7 @@ import {
     updateBaseOnMsgList,
     updateLastestHistory,
     sendMsgAppendInfo,
+    restoreLocalSessions,
 } from '@renderer/function/utils/msgUtil'
 import {
     delay,
@@ -1503,6 +1504,9 @@ function saveUser(msg: { [key: string]: any }, type: string) {
                 {},
                 'getRecentContact',
             )
+        // 根据本地保存的会话重建会话列表（服务端 get_recent_contact 恒空时的兜底），
+        // 并从服务端拉取每个会话的最新一条消息立即刷新
+        restoreLocalSessions()
     }
     // 如果是分离式的好友列表，继续获取分类信息
     if (type == 'friend' && authStore.jsonMap?.friend_category) {
