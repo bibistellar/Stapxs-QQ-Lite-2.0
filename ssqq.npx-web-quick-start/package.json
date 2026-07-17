@@ -12,7 +12,7 @@
     "build": "tsc",
     "test": "tsc && node bin/index.js help"
   },
-  "repository": "https://github.com/Stapxs/Stapxs-QQ-Lite-2.0",
+  "repository": "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0",
   "author": "Stapx Steve [林槐]",
   "license": "AGPL-3.0",
   "private": false,

@@ -4,7 +4,7 @@ body:
     - type: markdown
       attributes:
           value: |
-              在开始提交 BUG 前，请先前往 [里程碑](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/milestones) 检查已经在计划中的事项，如果没有再回来提交以防重复。
+              在开始提交 BUG 前，请先前往 [里程碑](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/milestones) 检查已经在计划中的事项，如果没有再回来提交以防重复。
     - type: dropdown
       attributes:
           label: 错误来源
