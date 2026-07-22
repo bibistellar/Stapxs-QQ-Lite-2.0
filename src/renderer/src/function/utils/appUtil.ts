@@ -110,6 +110,10 @@ export async function loadHistory(info: BaseChatInfoElem) {
     const chatStore = useChatStore()
     const settingsStore = useSettingsStore()
     chatStore.messageList = []
+    const prefetched = chatStore.recentHistoryCache.get(Number(info.id))
+    if (prefetched && prefetched.length > 0) {
+        chatStore.messageList = [...prefetched]
+    }
     // 本地有数据时立即显示，同时仍发网络请求以获取最新消息（避免遗漏）
     if (
         settingsStore.sysConfig.enable_local_history &&
@@ -121,7 +125,9 @@ export async function loadHistory(info: BaseChatInfoElem) {
             20,
         )
         if (localMsgs.length > 0) {
-            chatStore.messageList = localMsgs
+            const existing = new Map(chatStore.messageList.map((item) => [String(item.message_id), item]))
+            localMsgs.forEach((item) => existing.set(String(item.message_id), item))
+            chatStore.messageList = [...existing.values()].sort((a, b) => Number(a.time) - Number(b.time))
         }
     }
     if (!loadHistoryMessage(info.id, info.type)) {

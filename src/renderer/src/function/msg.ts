@@ -85,6 +85,53 @@ const logger = new Logger()
 let firstHeartbeatTime = -1
 let heartbeatTime = -1
 let loginWaveTimer: any = null
+const RECENT_HISTORY_SECONDS = 24 * 60 * 60
+const RECENT_HISTORY_COUNT = 200
+const RECENT_HISTORY_SESSION_LIMIT = 50
+const RECENT_HISTORY_REQUEST_GAP = 250
+const recentHistoryRequested = new Set<number>()
+
+function normalizeSeconds(value: unknown) {
+    const time = Number(value)
+    if (!Number.isFinite(time)) return 0
+    return time > 100000000000 ? Math.floor(time / 1000) : time
+}
+
+/** 登录后错峰预取最近 24 小时活跃会话，避免同时向 OneBot 发出大量请求。 */
+function scheduleRecentHistoryBootstrap(candidates?: any[]) {
+    const authStore = useAuthStore()
+    const contactStore = useContactStore()
+    const now = Math.floor(Date.now() / 1000)
+    const cutoff = now - RECENT_HISTORY_SECONDS
+    const source = candidates ?? [...contactStore.baseOnMsgList.values()]
+    const sessions = source
+        .filter((item) => {
+            const time = normalizeSeconds(item.time)
+            return time === 0 || time >= cutoff
+        })
+        .slice(0, RECENT_HISTORY_SESSION_LIMIT)
+
+    sessions.forEach((item, index) => {
+        const id = Number(item.user_id ?? item.group_id)
+        if (!Number.isFinite(id) || id <= 0 || recentHistoryRequested.has(id)) return
+        const type = item.chat_type == 2 || item.group_id != undefined ? 'group' : 'user'
+        const name = type === 'group'
+            ? authStore.jsonMap.message_list?.name
+            : authStore.jsonMap.message_list?.private_name
+        if (!name) return
+        recentHistoryRequested.add(id)
+        window.setTimeout(() => {
+            if (!login.status) return
+            Connector.send(name, {
+                group_id: type === 'group' ? id : undefined,
+                user_id: type !== 'group' ? id : undefined,
+                message_id: 0,
+                message_seq: 0,
+                count: RECENT_HISTORY_COUNT,
+            }, `getChatHistoryBootstrap_${id}_${type}`)
+        }, index * RECENT_HISTORY_REQUEST_GAP)
+    })
+}
 
 export function setLoginWaveTimer(timer: any) {
     loginWaveTimer = timer
@@ -783,6 +830,34 @@ const msgFunctions = {
             })
             .catch(() => {})
     },
+    getChatHistoryBootstrap: (
+        _: string,
+        msg: { [key: string]: any },
+        metaArgs?: string[],
+    ) => {
+        const id = Number(metaArgs?.[1])
+        if (!Number.isFinite(id) || msg.data === null) return
+        const chatStore = useChatStore()
+        const authStore = useAuthStore()
+        const cutoff = Math.floor(Date.now() / 1000) - RECENT_HISTORY_SECONDS
+        void normalizeMessagesFromPayload(msg).then((list) => {
+            if (!list) return
+            const recent = list.filter((item) => normalizeSeconds(item.time) >= cutoff)
+            if (recent.length === 0) return
+            const merged = mergeMessagesByIdAndTime(
+                chatStore.recentHistoryCache.get(id) ?? [],
+                recent,
+            )
+            chatStore.recentHistoryCache.set(id, merged)
+            saveMessagesWithSideEffects(authStore.loginInfo.uin, recent)
+
+            const session = useContactStore().baseOnMsgList.get(id)
+            const latest = merged[merged.length - 1]
+            if (session && latest) {
+                Object.assign(session, formatMessageData(latest, metaArgs?.[2] === 'group'))
+            }
+        }).catch((e) => logger.error(e as Error, '预取最近会话历史失败'))
+    },
     getChatHistory: (_: string, msg: { [key: string]: any }) => {
         const uiStore = useUIStore()
         if (msg.data === null) {
@@ -1267,6 +1342,7 @@ const msgFunctions = {
                     updateLastestHistory(user)
                 }
             })
+            scheduleRecentHistoryBootstrap(back)
         }
     },
 
@@ -1507,6 +1583,7 @@ function saveUser(msg: { [key: string]: any }, type: string) {
         // 根据本地保存的会话重建会话列表（服务端 get_recent_contact 恒空时的兜底），
         // 并从服务端拉取每个会话的最新一条消息立即刷新
         restoreLocalSessions()
+        scheduleRecentHistoryBootstrap()
     }
     // 如果是分离式的好友列表，继续获取分类信息
     if (type == 'friend' && authStore.jsonMap?.friend_category) {
@@ -2259,6 +2336,7 @@ export function resetRimtime(resetAll = false) {
     firstHeartbeatTime = -1
     heartbeatTime = -1
     clearMetaEventWatchdog()
+    recentHistoryRequested.clear()
     if (resetAll) {
         // Reset auth store
         const authStore = useAuthStore()
@@ -2287,6 +2365,7 @@ export function resetRimtime(resetAll = false) {
             },
         })
         chatStore.messageList = []
+        chatStore.recentHistoryCache.clear()
         // Reset connection store
         const connectionStore = useConnectionStore()
         connectionStore.heartbeatTime = -1

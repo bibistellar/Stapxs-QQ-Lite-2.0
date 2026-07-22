@@ -1,6 +1,6 @@
 import { ChatInfoElem, MergeStackData } from '@renderer/function/elements/information'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 
 export const useChatStore = defineStore('chat', () => {
     const chatInfo = ref<ChatInfoElem>({
@@ -20,6 +20,8 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     const messageList = ref<any[]>([])
+    // 登录后预取的最近会话历史；打开会话时可先即时展示，再由网络请求校准。
+    const recentHistoryCache = reactive(new Map<number, any[]>())
     const mergeMsgStack = ref<MergeStackData[]>([])
     const mergeMessageList = ref<any[] | undefined>(undefined)
     const mergeMessageImgList = ref<any[] | undefined>(undefined)
@@ -27,6 +29,7 @@ export const useChatStore = defineStore('chat', () => {
     return {
         chatInfo,
         messageList,
+        recentHistoryCache,
         mergeMsgStack,
         mergeMessageList,
         mergeMessageImgList,

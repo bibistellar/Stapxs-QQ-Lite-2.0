@@ -38,10 +38,25 @@ let reconnectAttempts = 0
 let wantConnected = false
 let lifecycleHooksBound = false
 let lastReconnectNow = 0
+let healthCheckTimer: number | undefined = undefined
+let healthCheckRunning = false
+let healthCheckFailures = 0
 // 退避上限 30s；每次失败翻倍，成功后归零
 const RECONNECT_MAX_DELAY = 30000
 // 唤醒/联网事件去抖，避免多个事件在同一时刻重复触发重连
 const RECONNECT_NOW_DEBOUNCE = 3000
+const HEALTH_CHECK_INTERVAL = 30000
+const HEALTH_CHECK_TIMEOUT = 10000
+const HEALTH_CHECK_FAILURE_LIMIT = 2
+
+function stopHealthCheck() {
+    if (healthCheckTimer) {
+        clearInterval(healthCheckTimer)
+        healthCheckTimer = undefined
+    }
+    healthCheckRunning = false
+    healthCheckFailures = 0
+}
 
 export let websocket: WebSocket | undefined = undefined
 const WS_PROTOCOL = 'ws' + '://'
@@ -283,6 +298,7 @@ export class Connector {
             clearTimeout(reconnectTimer)
             reconnectTimer = undefined
         }
+        this.startHealthCheck()
         // 保存登录信息
         Option.save('address', address)
         // 保存密钥
@@ -368,13 +384,19 @@ export class Connector {
             connectionStore.metaEventWatchTimer = undefined
         }
         connectionStore.metaEventTimeoutTriggered = false
+        stopHealthCheck()
         websocket = undefined
         updateMenu({ parent: 'account', id: 'logout', action: 'visible', value: 'false' })
         updateMenu({ parent: 'account', id: 'userName', action: 'label', value: $t('连接') })
 
         switch (Number(code)) {
             case 1000:
-                popInfo.add(PopType.INFO, $t('连接已断开') + (msg ? (': ' + msg.replace(':', ' - ')) : ''), false)
+                if (wantConnected) {
+                    logger.add(LogType.WS, '连接被远端关闭，准备自动重连')
+                    this.scheduleReconnect(address, token)
+                } else {
+                    popInfo.add(PopType.INFO, $t('连接已断开') + (msg ? (': ' + msg.replace(':', ' - ')) : ''), false)
+                }
                 break // 正常关闭
             case 1006: {
                 // 非正常关闭，尝试重连
@@ -404,6 +426,7 @@ export class Connector {
             default: {
                 login.creating = false
                 popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('未知的错误 {code}',{ code: code }), false)
+                this.scheduleReconnect(address, token)
             }
         }
 
@@ -425,6 +448,7 @@ export class Connector {
         }
         connectionStore.metaEventTimeoutTriggered = false
         forceCloseReason = undefined
+        stopHealthCheck()
         // 用户主动断开：停止自动重连
         wantConnected = false
         reconnectAttempts = 0
@@ -457,7 +481,8 @@ export class Connector {
         forceCloseReason = reason
 
         if(!backend.isWeb()) {
-            this.onclose(1006, reason, login.address, login.token)
+            // 先真正关闭后端持有的 socket；关闭事件会回到 onclose 并进入统一重连流程。
+            backend.call('Onebot', 'onebot:close', false)
             return
         }
         if (websocket) {
@@ -523,6 +548,38 @@ export class Connector {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') this.reconnectNow()
         })
+    }
+
+    /**
+     * 定时发起只读状态请求。WebSocket 静默失效时浏览器未必触发 close，
+     * 连续两次探针无响应后主动关闭连接，让统一的退避流程接管重连。
+     */
+    static startHealthCheck() {
+        stopHealthCheck()
+        if (import.meta.env.VITE_APP_SSE_MODE == 'true') return
+
+        const check = async () => {
+            if (!wantConnected || !login.status || healthCheckRunning) return
+            healthCheckRunning = true
+            const echo = 'health_' + uuid()
+            try {
+                this.sendRaw('get_status', {}, echo)
+                // 只要服务端有响应就说明链路可用；不要求具体 OneBot 实现支持此 API。
+                await this.waitReturn(echo, HEALTH_CHECK_TIMEOUT)
+                healthCheckFailures = 0
+            } catch (e) {
+                this.ReMap.delete(echo)
+                healthCheckFailures++
+                logger.add(LogType.WS, `连接探针超时（${healthCheckFailures}/${HEALTH_CHECK_FAILURE_LIMIT}）`)
+                if (healthCheckFailures >= HEALTH_CHECK_FAILURE_LIMIT) {
+                    this.forceDisconnect('连接状态轮询超时')
+                }
+            } finally {
+                healthCheckRunning = false
+            }
+        }
+
+        healthCheckTimer = window.setInterval(check, HEALTH_CHECK_INTERVAL)
     }
 
     /**

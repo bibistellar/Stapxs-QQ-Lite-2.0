@@ -12,7 +12,7 @@ export class Connector {
 
     private win: BrowserWindow
     private websocket: WebSocket | undefined
-    private reconnectTimes = 0
+    private connectionOpened = false
 
     constructor(win: BrowserWindow) {
         this.logger.level = logLevel
@@ -54,7 +54,7 @@ export class Connector {
         }
 
         this.websocket.onopen = () => {
-            this.reconnectTimes = 0
+            this.connectionOpened = true
             this.logger.info('已成功连接到', url)
             this.win.webContents.send('onebot:onopen', {
                 address: url,
@@ -68,37 +68,21 @@ export class Connector {
             this.websocket = undefined
 
             this.logger.info('连接已关闭，代码：', e.code)
-            if (e.code != 1006 && e.code != 1015) {
-                // 除了需要重连的情况，其他情况都直接常规处理
-                this.win.webContents.send('onebot:onclose', {
-                    code: e.code,
-                    message: e.reason,
-                    address: url,
-                    token: token,
-                })
-            } else {
-                this.win.webContents.send('onebot:onclose', {
-                    code: -1,
-                    message: e.reason,
-                    address: url,
-                    token: token,
-                })
+            let retryUrl = url
+            // 仅首次握手失败时尝试另一种协议；已经成功过的连接掉线后保持原协议，
+            // 避免把正常的 wss 连接意外降级成 ws。
+            if (!this.connectionOpened && e.code === 1006) {
+                retryUrl = url.startsWith('wss://')
+                    ? 'ws://' + url.slice('wss://'.length)
+                    : 'wss://' + url.slice('ws://'.length)
             }
-            if (this.reconnectTimes < 4) {
-                setTimeout(() => {
-                    if (e.code == 1006) {
-                        // 连接失败，尝试轮替协议重连
-                        if (url.indexOf('wss://') >= 0) {
-                            url = url.replace('wss://', 'ws://')
-                        } else {
-                            url = url.replace('ws://', 'wss://')
-                        }
-                        this.logger.warn('连接失败，尝试重连...')
-                        this.connect(url, token)
-                    }
-                    this.reconnectTimes++
-                }, 1500)
-            }
+            // 重连策略统一由渲染进程管理，避免前后端同时重试形成重复连接。
+            this.win.webContents.send('onebot:onclose', {
+                code: e.code,
+                message: e.reason,
+                address: retryUrl,
+                token: token,
+            })
         }
         this.websocket.onerror = (e) => {
             this.websocket = undefined
