@@ -1,6 +1,7 @@
 # 测试构建发布
 name: build-nightly-app
 on:
+    workflow_dispatch:
     push:
         branches:
             - nightly
