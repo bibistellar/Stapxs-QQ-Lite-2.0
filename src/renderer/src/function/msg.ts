@@ -88,8 +88,10 @@ let loginWaveTimer: any = null
 const RECENT_HISTORY_SECONDS = 24 * 60 * 60
 const RECENT_HISTORY_COUNT = 200
 const RECENT_HISTORY_SESSION_LIMIT = 50
+const RECENT_HISTORY_PROBE_LIMIT = 500
 const RECENT_HISTORY_REQUEST_GAP = 250
 const recentHistoryRequested = new Set<number>()
+const recentHistoryProbed = new Set<number>()
 
 function normalizeSeconds(value: unknown) {
     const time = Number(value)
@@ -98,28 +100,29 @@ function normalizeSeconds(value: unknown) {
 }
 
 /** 登录后错峰预取最近 24 小时活跃会话，避免同时向 OneBot 发出大量请求。 */
-function scheduleRecentHistoryBootstrap(candidates?: any[]) {
+function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false) {
     const authStore = useAuthStore()
     const contactStore = useContactStore()
     const now = Math.floor(Date.now() / 1000)
     const cutoff = now - RECENT_HISTORY_SECONDS
     const source = candidates ?? [...contactStore.baseOnMsgList.values()]
-    const sessions = source
-        .filter((item) => {
+    const sessions = probeUnknown
+        ? source.slice(0, RECENT_HISTORY_PROBE_LIMIT)
+        : source.filter((item) => {
             const time = normalizeSeconds(item.time)
             return time === 0 || time >= cutoff
-        })
-        .slice(0, RECENT_HISTORY_SESSION_LIMIT)
+        }).slice(0, RECENT_HISTORY_SESSION_LIMIT)
 
     sessions.forEach((item, index) => {
         const id = Number(item.user_id ?? item.group_id)
-        if (!Number.isFinite(id) || id <= 0 || recentHistoryRequested.has(id)) return
+        const seen = probeUnknown ? recentHistoryProbed : recentHistoryRequested
+        if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
         const type = item.chat_type == 2 || item.group_id != undefined ? 'group' : 'user'
         const name = type === 'group'
             ? authStore.jsonMap.message_list?.name
             : authStore.jsonMap.message_list?.private_name
         if (!name) return
-        recentHistoryRequested.add(id)
+        seen.add(id)
         window.setTimeout(() => {
             if (!login.status) return
             Connector.send(name, {
@@ -127,9 +130,11 @@ function scheduleRecentHistoryBootstrap(candidates?: any[]) {
                 user_id: type !== 'group' ? id : undefined,
                 message_id: 0,
                 message_seq: 0,
-                count: RECENT_HISTORY_COUNT,
-            }, `getChatHistoryBootstrap_${id}_${type}`)
-        }, index * RECENT_HISTORY_REQUEST_GAP)
+                count: probeUnknown ? 1 : RECENT_HISTORY_COUNT,
+            }, probeUnknown
+                ? `getChatHistoryBootstrapProbe_${id}_${type}`
+                : `getChatHistoryBootstrap_${id}_${type}`)
+        }, index * (probeUnknown ? 100 : RECENT_HISTORY_REQUEST_GAP))
     })
 }
 
@@ -858,6 +863,22 @@ const msgFunctions = {
             }
         }).catch((e) => logger.error(e as Error, '预取最近会话历史失败'))
     },
+    getChatHistoryBootstrapProbe: (
+        _: string,
+        msg: { [key: string]: any },
+        metaArgs?: string[],
+    ) => {
+        const id = Number(metaArgs?.[1])
+        if (!Number.isFinite(id) || msg.data === null) return
+        const cutoff = Math.floor(Date.now() / 1000) - RECENT_HISTORY_SECONDS
+        void normalizeMessagesFromPayload(msg).then((list) => {
+            const latest = list?.[list.length - 1]
+            if (!latest || normalizeSeconds(latest.time) < cutoff) return
+            const contact = useContactStore().userList.find((item) =>
+                Number(item.user_id ?? item.group_id) === id)
+            if (contact) scheduleRecentHistoryBootstrap([contact])
+        }).catch((e) => logger.error(e as Error, '探测最近会话历史失败'))
+    },
     getChatHistory: (_: string, msg: { [key: string]: any }) => {
         const uiStore = useUIStore()
         if (msg.data === null) {
@@ -1342,7 +1363,11 @@ const msgFunctions = {
                     updateLastestHistory(user)
                 }
             })
-            scheduleRecentHistoryBootstrap(back)
+            if (back.length > 0) {
+                scheduleRecentHistoryBootstrap(back)
+            } else {
+                scheduleRecentHistoryBootstrap(contactStore.userList, true)
+            }
         }
     },
 
@@ -1583,7 +1608,12 @@ function saveUser(msg: { [key: string]: any }, type: string) {
         // 根据本地保存的会话重建会话列表（服务端 get_recent_contact 恒空时的兜底），
         // 并从服务端拉取每个会话的最新一条消息立即刷新
         restoreLocalSessions()
-        scheduleRecentHistoryBootstrap()
+        if (authStore.jsonMap?.recent_contact) {
+            scheduleRecentHistoryBootstrap()
+        } else {
+            // SnowLuma/Lagrange 没有可用的最近会话接口：先以每个联系人 1 条消息探测活跃度。
+            scheduleRecentHistoryBootstrap(contactStore.userList, true)
+        }
     }
     // 如果是分离式的好友列表，继续获取分类信息
     if (type == 'friend' && authStore.jsonMap?.friend_category) {
@@ -2337,6 +2367,7 @@ export function resetRimtime(resetAll = false) {
     heartbeatTime = -1
     clearMetaEventWatchdog()
     recentHistoryRequested.clear()
+    recentHistoryProbed.clear()
     if (resetAll) {
         // Reset auth store
         const authStore = useAuthStore()
