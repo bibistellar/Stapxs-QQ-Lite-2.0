@@ -874,9 +874,17 @@ const msgFunctions = {
         void normalizeMessagesFromPayload(msg).then((list) => {
             const latest = list?.[list.length - 1]
             if (!latest || normalizeSeconds(latest.time) < cutoff) return
-            const contact = useContactStore().userList.find((item) =>
+            const contactStore = useContactStore()
+            const contact = contactStore.userList.find((item) =>
                 Number(item.user_id ?? item.group_id) === id)
-            if (contact) scheduleRecentHistoryBootstrap([contact])
+            if (contact) {
+                const isGroup = metaArgs?.[2] === 'group'
+                Object.assign(contact, formatMessageData(latest, isGroup))
+                contactStore.baseOnMsgList.set(id, contact)
+                // baseOnMsgList 是会话数据源，立即重算显示列表，否则历史虽已拉取但首页仍为空。
+                updateBaseOnMsgList()
+                scheduleRecentHistoryBootstrap([contact])
+            }
         }).catch((e) => logger.error(e as Error, '探测最近会话历史失败'))
     },
     getChatHistory: (_: string, msg: { [key: string]: any }) => {
