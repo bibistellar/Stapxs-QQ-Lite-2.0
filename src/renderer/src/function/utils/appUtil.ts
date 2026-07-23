@@ -110,10 +110,9 @@ export async function loadHistory(info: BaseChatInfoElem) {
     const chatStore = useChatStore()
     const settingsStore = useSettingsStore()
     chatStore.messageList = []
-    const prefetched = chatStore.recentHistoryCache.get(Number(info.id))
-    if (prefetched && prefetched.length > 0) {
-        chatStore.messageList = [...prefetched]
-    }
+    // 后台预取可能一次包含大量、复杂的消息段。不要在点击会话时同步灌入聊天组件，
+    // 否则其中任一异常消息或集中预处理都可能阻断聊天视图挂载。
+    // 当前会话仍走下方经过验证的本地最新消息 + OneBot 实时请求链路。
     // 本地有数据时立即显示，同时仍发网络请求以获取最新消息（避免遗漏）
     if (
         settingsStore.sysConfig.enable_local_history &&
