@@ -475,6 +475,9 @@ pub fn sys_create_menu(app: tauri::AppHandle, data: HashMap<String, String>) -> 
                 "about" => {
                     app.emit("app:about", "").unwrap();
                 }
+                "checkUpdate" => {
+                    app.emit("app:checkUpdate", "").unwrap();
+                }
                 "logout" => {
                     app.emit("bot:logout", "").unwrap();
                 }

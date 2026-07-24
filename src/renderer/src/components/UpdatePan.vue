@@ -102,21 +102,14 @@ const info = ref({
 const releaseList = ref<any[]>([])
 
 function parseMessage(message: string) {
-    let msg = message
-    // 处理 title，取开头到下一个 "\r\n" 之间的内容
-    const title = msg.split('\r\n')[0].substring(1)
-    // 处理 msg，取 "## 更新内容" 到下一个 "##" 之间的内容
-    const start = msg.indexOf('## 更新内容\r\n')
-    if (start != -1) {
-        msg = msg.substring(start + 9)
-        const end = msg.indexOf('##')
-        if (end != -1) {
-            msg = msg.substring(0, end)
-        }
-    }
-    msg = title + '\r\n' + msg
-
-    const updateInfo = msg.split('\n')
+    const normalized = message.replace(/\r\n/g, '\n')
+    const firstHeading = normalized.split('\n')
+        .find((line) => line.trim().startsWith('# '))
+    const title = firstHeading?.replace(/^#\s*/, '').trim() || 'Release'
+    const section = normalized.match(
+        /(?:^|\n)##\s*更新内容\s*\n([\s\S]*?)(?=\n##\s|$)/,
+    )?.[1] ?? normalized
+    const updateInfo = [title, ...section.split('\n')]
     const result = {
         title: updateInfo[0],
         content: [] as { [key: string]: string }[],

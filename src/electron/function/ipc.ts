@@ -418,7 +418,12 @@ export function regIpcListener() {
                                 sendMenuClick('app:about')
                             },
                         },
-                        { label: args.update },
+                        {
+                            label: args.update,
+                            click: () => {
+                                sendMenuClick('app:checkUpdate')
+                            },
+                        },
                         { type: 'separator' },
                         { label: args.hide, role: 'hide' },
                         { label: args.hideOthers, role: 'hideothers' },

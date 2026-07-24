@@ -465,6 +465,9 @@ export function createIpc() {
         }
         uiStore.popBoxList.push(popInfo)
     })
+    backend.addListener(undefined, 'app:checkUpdate', () => {
+        void checkUpdate(true)
+    })
     backend.addListener(undefined, 'sys:handleUri', (event, data) => {
         logger.info(JSON.stringify(data ?? event.payload))
     })
@@ -786,62 +789,103 @@ function setQuickLogin(address: string, port: number) {
 /**
 * 检查更新
 */
-export function checkUpdate() {
+export async function checkUpdate(manual = false) {
+    const { $t } = app.config.globalProperties
     const repoName = import.meta.env.VITE_APP_REPO_NAME
-    // 获取最新的 release 信息
-    const packageUrl =
-        `https://api.github.com/repos/${repoName}/releases/latest`
-    fetch(packageUrl).then((response) => {
-        if (response.ok) {
-            response.json().then((data) => {
-                showUpadteLog(data)
-            })
+    const packageUrl = `https://api.github.com/repos/${repoName}/releases/latest`
+    const cacheVersion = localStorage.getItem('version')
+    try {
+        const response = await fetch(packageUrl, {
+            headers: { Accept: 'application/vnd.github+json' },
+        })
+        if (!response.ok) throw new Error(`GitHub API ${response.status}`)
+        const data = await response.json()
+        const hasUpdate = showUpadteLog(data, cacheVersion)
+        if (manual && !hasUpdate) {
+            new PopInfo().add(PopType.INFO, $t('当前已是最新版本'), false)
         }
-    })
-    localStorage.setItem('version', appInfo.version)
+        localStorage.setItem('version', appInfo.version)
+    } catch (e) {
+        logger.error(e as Error, '检查更新失败')
+        if (manual) {
+            new PopInfo().add(PopType.ERR, $t('检查更新失败'), false)
+        }
+    }
 }
 
 /**
 * 展示更新弹窗
 * @param data 更新数据
 */
-function showUpadteLog(data: any) {
+function showUpadteLog(data: any, cacheVersion: string | null) {
     const appVersion = appInfo.version // 当前版本
-    const cacheVersion = localStorage.getItem('version') // 缓存版本
     // 这儿有两种情况：
     //    如果当前版本小于获取到的版本就是有更新
     //    如果缓存版本小于获取到的版本但是当前版本等于获取到的版本就是更新完成首次启动
-    const latestVersion = data.tag_name.substring(1)
+    const latestVersion = String(data.tag_name ?? '').replace(/^v/, '')
+    const releaseCommit = String(data.body ?? '')
+        .match(/构建提交[：:]\s*([a-f0-9]{7,40})/i)?.[1] ?? ''
+    const newerVersion = Boolean(
+        semver.valid(appVersion) &&
+        semver.valid(latestVersion) &&
+        semver.lt(appVersion, latestVersion),
+    )
+    const sameVersion = Boolean(
+        semver.valid(appVersion) &&
+        semver.valid(latestVersion) &&
+        semver.eq(appVersion, latestVersion),
+    )
+    // release.yml 会复用同一版本号更新构建产物；使用构建 SHA 识别同版本的新构建。
+    const newerBuild = Boolean(
+        sameVersion &&
+        releaseCommit &&
+        __BUILD_COMMIT__ &&
+        !releaseCommit.startsWith(__BUILD_COMMIT__) &&
+        !__BUILD_COMMIT__.startsWith(releaseCommit),
+    )
 
-    if (semver.lt(appVersion, latestVersion)) {
+    if (newerVersion || newerBuild) {
         // 有更新
         showReleaseLog(data, false)
+        return true
     }
     if (
         cacheVersion &&
+        semver.valid(cacheVersion) &&
+        semver.valid(latestVersion) &&
         semver.eq(appVersion, latestVersion) &&
         semver.lt(cacheVersion, latestVersion)
     ) {
         // 更新完成首次启动
         showReleaseLog(data, true)
+        return true
     }
+    return false
 }
+
+function getReleaseDownloadUrl(data: any) {
+    const assets = Array.isArray(data.assets) ? data.assets : []
+    const arch = (backend.arch ?? '').toLowerCase()
+    let pattern: RegExp | undefined
+    if (backend.platform === 'win32') {
+        pattern = /(x64|amd64)-setup\.exe$/i
+    } else if (backend.platform === 'darwin') {
+        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.dmg$/i
+        else pattern = /_x64\.dmg$/i
+    } else if (backend.platform === 'linux') {
+        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.AppImage$/i
+        else pattern = /_amd64\.AppImage$/i
+    }
+    const asset = pattern
+        ? assets.find((item: any) => pattern?.test(String(item.name ?? '')))
+        : undefined
+    return asset?.browser_download_url ?? data.html_url
+}
+
 function showReleaseLog(data: any, isUpdated: boolean) {
     const uiStore = useUIStore()
     const { $t } = app.config.globalProperties
-    let msg = data.body
-    // 处理 title，取开头到下一个 “\r\n” 之间的内容
-    const title = msg.split('\r\n')[0].substring(1)
-    // 处理 msg，取 “## 更新内容” 到下一个 “##” 之间的内容
-    const start = msg.indexOf('## 更新内容\r\n')
-    if (start != -1) {
-        msg = msg.substring(start + 9)
-        const end = msg.indexOf('##')
-        if (end != -1) {
-            msg = msg.substring(0, end)
-        }
-    }
-    msg = title + '\r\n' + msg
+    const msg = String(data.body ?? '')
     const info = {
         version:
             (isUpdated ? localStorage.getItem('version') + ' -> ' : '') +
@@ -863,7 +907,7 @@ function showReleaseLog(data: any, isUpdated: boolean) {
         {
             text: $t('下载更新…'),
             master: true,
-            fun: () => openLink(data.html_url),
+            fun: () => openLink(getReleaseDownloadUrl(data)),
         },
     ] : [
         {
@@ -910,17 +954,7 @@ export function showReleaseHistory() {
             response.json().then((dataList: any[]) => {
                 // 解析最近5条更新记录
                 const releases = dataList.map((data) => {
-                    let msg = data.body
-                    const title = msg.split('\r\n')[0].substring(1)
-                    const start = msg.indexOf('## 更新内容\r\n')
-                    if (start != -1) {
-                        msg = msg.substring(start + 9)
-                        const end = msg.indexOf('##')
-                        if (end != -1) {
-                            msg = msg.substring(0, end)
-                        }
-                    }
-                    msg = title + '\r\n' + msg
+                    const msg = String(data.body ?? '')
 
                     return {
                         version: data.tag_name.substring(1),

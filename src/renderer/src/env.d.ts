@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+declare const __BUILD_COMMIT__: string
+
 declare module 'vue3-danmaku'
 declare module '*.vue' {
     import type { DefineComponent } from 'vue'
