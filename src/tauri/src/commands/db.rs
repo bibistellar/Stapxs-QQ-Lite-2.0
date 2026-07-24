@@ -319,6 +319,43 @@ pub fn db_get_latest(
     })
 }
 
+/// 获取当前账号最近活跃会话的最后一条消息，用于启动时从数据库重建会话列表。
+#[tauri::command]
+pub fn db_get_recent_sessions(
+    state: State<DbState>,
+    self_id: String,
+    limit: i64,
+) -> Result<Vec<MsgRecord>, String> {
+    state.with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT message_id, chat_id, chat_type, sender_id, sender_name,
+                        seq, time, message, raw_message, revoked
+                 FROM (
+                     SELECT message_id, chat_id, chat_type, sender_id, sender_name,
+                            seq, time, message, raw_message, revoked, id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY chat_id
+                                ORDER BY time DESC, id DESC
+                            ) AS session_rank
+                     FROM messages
+                     WHERE self_id = ?1 AND revoked = 0
+                 )
+                 WHERE session_rank = 1
+                 ORDER BY time DESC, id DESC
+                 LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let list = stmt
+            .query_map(params![self_id, limit.clamp(1, 500)], row_to_record)
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(list)
+    })
+}
+
 /// 获取锚点消息之前（更旧）的 n 条，不含锚点本身，正序返回
 ///
 /// 典型用途：上拉加载更多历史。

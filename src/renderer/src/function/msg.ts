@@ -55,7 +55,11 @@ import {
 import { NotifyInfo } from './elements/system'
 import { Notify } from './notify'
 import { backend } from '@renderer/runtime/backend'
-import { dbRevokeMessage, saveMessagesWithSideEffects } from './utils/localHistoryUtil'
+import {
+    dbGetRecentSessions,
+    dbRevokeMessage,
+    saveMessagesWithSideEffects,
+} from './utils/localHistoryUtil'
 import { addDownloadTask, completeUploadTask } from '@renderer/components/FileManager.vue'
 import { refreshFavicon } from './favicon'
 import { Img } from './model/img'
@@ -92,6 +96,7 @@ const RECENT_HISTORY_PROBE_LIMIT = 500
 const RECENT_HISTORY_REQUEST_GAP = 250
 const recentHistoryRequested = new Set<number>()
 const recentHistoryProbed = new Set<number>()
+let databaseSessionsRestoredFor = ''
 
 function normalizeSeconds(value: unknown) {
     const time = Number(value)
@@ -136,6 +141,34 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
                 : `getChatHistoryBootstrap_${id}_${type}`)
         }, index * (probeUnknown ? 100 : RECENT_HISTORY_REQUEST_GAP))
     })
+}
+
+/** 使用 SQLite 中每个会话的最新消息，在网络请求前立即恢复消息面板。 */
+async function restoreDatabaseSessions() {
+    const authStore = useAuthStore()
+    const settingsStore = useSettingsStore()
+    const contactStore = useContactStore()
+    const uin = String(authStore.loginInfo?.uin ?? '')
+    if (
+        !uin ||
+        databaseSessionsRestoredFor === uin ||
+        settingsStore.sysConfig.enable_local_history !== true
+    ) return
+
+    databaseSessionsRestoredFor = uin
+    const latestMessages = await dbGetRecentSessions(uin, 200)
+    let restored = 0
+    latestMessages.forEach((latest) => {
+        const id = Number(latest?.infoList?.group_id ?? latest?.infoList?.target_id)
+        if (!Number.isFinite(id) || id <= 0) return
+        const contact = contactStore.userList.find((item) =>
+            Number(item.user_id ?? item.group_id) === id)
+        if (!contact) return
+        Object.assign(contact, formatMessageData(latest, latest.message_type === 'group'))
+        contactStore.baseOnMsgList.set(id, contact)
+        restored++
+    })
+    if (restored > 0) updateBaseOnMsgList()
 }
 
 export function setLoginWaveTimer(timer: any) {
@@ -1616,6 +1649,7 @@ function saveUser(msg: { [key: string]: any }, type: string) {
         // 根据本地保存的会话重建会话列表（服务端 get_recent_contact 恒空时的兜底），
         // 并从服务端拉取每个会话的最新一条消息立即刷新
         restoreLocalSessions()
+        void restoreDatabaseSessions()
         if (authStore.jsonMap?.recent_contact) {
             scheduleRecentHistoryBootstrap()
         } else {
@@ -2376,6 +2410,7 @@ export function resetRimtime(resetAll = false) {
     clearMetaEventWatchdog()
     recentHistoryRequested.clear()
     recentHistoryProbed.clear()
+    databaseSessionsRestoredFor = ''
     if (resetAll) {
         // Reset auth store
         const authStore = useAuthStore()

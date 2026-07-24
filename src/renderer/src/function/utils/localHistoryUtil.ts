@@ -232,6 +232,19 @@ export async function dbGetLatest(
     return callDbRecordList(selfId, 'db:getLatest', { chatId, n }, '[LocalHistory] dbGetLatest 失败')
 }
 
+/** 获取每个最近会话的最后一条本地消息，按活跃时间倒序。 */
+export async function dbGetRecentSessions(
+    selfId: string | number,
+    limit = 200,
+): Promise<any[]> {
+    return callDbRecordList(
+        selfId,
+        'db:getRecentSessions',
+        { limit },
+        '[LocalHistory] dbGetRecentSessions 失败',
+    )
+}
+
 /**
  * 获取锚点消息之前（更旧）的 n 条，不含锚点本身，正序返回。
  *
