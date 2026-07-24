@@ -172,7 +172,7 @@
             </ul>
         </BcMenu>
         <div :class="'friend-list-space' + (uiStore.openSideBar ? ' open' : '')">
-            <div v-if="!loginInfo.status || chatStore.chatInfo.show.id == 0" class="ss-card">
+            <div v-if="(!loginInfo.status && !loginInfo.localReady) || chatStore.chatInfo.show.id == 0" class="ss-card">
                 <font-awesome-icon :icon="['fas', 'inbox']" />
                 <span>{{ $t('选择联系人开始聊天') }}</span>
             </div>

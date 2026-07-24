@@ -433,6 +433,7 @@ export class Connector {
         logger.error(null, $t('连接失败') + ': ' + code)
         login.creating = false
         login.status = false
+        login.localReady = Boolean(useAuthStore().loginInfo?.uin)
     }
 
     // 连接器操作 =====================================================
@@ -716,6 +717,7 @@ export class Connector {
 export const login: LoginCacheElem = reactive({
     quickLogin: [],
     status: false,
+    localReady: false,
     address: '',
     token: '',
     creating: false,

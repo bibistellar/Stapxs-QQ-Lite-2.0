@@ -129,7 +129,8 @@ export async function loadHistory(info: BaseChatInfoElem) {
             chatStore.messageList = [...existing.values()].sort((a, b) => Number(a.time) - Number(b.time))
         }
     }
-    if (!loadHistoryMessage(info.id, info.type)) {
+    // 离线模式只读 SQLite；OneBot 恢复后再由实时请求校准。
+    if (login.status && !loadHistoryMessage(info.id, info.type)) {
         new PopInfo().add(
             PopType.ERR,
             app.config.globalProperties.$t('加载历史消息失败'),

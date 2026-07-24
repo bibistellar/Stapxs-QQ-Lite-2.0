@@ -6,7 +6,7 @@ import option from '@renderer/function/option'
 import { Logger, PopInfo, PopType } from '@renderer/function/base'
 import { useSettingsStore } from '@renderer/state/settings'
 import { v4 as uuid } from 'uuid'
-import { Connector } from '@renderer/function/connect'
+import { Connector, login } from '@renderer/function/connect'
 import {
     BotMsgType,
     UserFriendElem,
@@ -437,6 +437,14 @@ export function sendMsgRaw(
     const chatStore = useChatStore()
     const authStore = useAuthStore()
     const uiStore = useUIStore()
+    if (!login.status) {
+        new PopInfo().add(
+            PopType.ERR,
+            app.config.globalProperties.$t('当前处于离线模式，无法发送消息'),
+            false,
+        )
+        return
+    }
     // 如果消息为空则不发送
     if (msg == undefined || msg == '' || (Array.isArray(msg) && msg.length == 0)) {
         return

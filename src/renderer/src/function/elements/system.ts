@@ -17,6 +17,7 @@ export interface LoginCacheElem {
     address: string
     token: string
     status: boolean,
+    localReady: boolean
     creating: boolean
     connectionHistory: ConnectionHistoryItem[]
 }

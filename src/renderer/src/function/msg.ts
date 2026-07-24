@@ -144,16 +144,25 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
 }
 
 /** 使用 SQLite 中每个会话的最新消息，在网络请求前立即恢复消息面板。 */
-async function restoreDatabaseSessions() {
+export async function restoreDatabaseSessions(
+    offlineUin?: string,
+    offlineNickname?: string,
+) {
     const authStore = useAuthStore()
     const settingsStore = useSettingsStore()
     const contactStore = useContactStore()
-    const uin = String(authStore.loginInfo?.uin ?? '')
+    if (offlineUin && !authStore.loginInfo?.uin) {
+        authStore.loginInfo = {
+            uin: offlineUin,
+            nickname: offlineNickname ?? offlineUin,
+        }
+    }
+    const uin = String(offlineUin ?? authStore.loginInfo?.uin ?? '')
     if (
         !uin ||
         databaseSessionsRestoredFor === uin ||
         settingsStore.sysConfig.enable_local_history !== true
-    ) return
+    ) return 0
 
     databaseSessionsRestoredFor = uin
     const latestMessages = await dbGetRecentSessions(uin, 200)
@@ -161,14 +170,34 @@ async function restoreDatabaseSessions() {
     latestMessages.forEach((latest) => {
         const id = Number(latest?.infoList?.group_id ?? latest?.infoList?.target_id)
         if (!Number.isFinite(id) || id <= 0) return
-        const contact = contactStore.userList.find((item) =>
+        let contact = contactStore.userList.find((item) =>
             Number(item.user_id ?? item.group_id) === id)
-        if (!contact) return
+        if (!contact) {
+            if (latest.message_type === 'group') {
+                contact = {
+                    group_id: id,
+                    group_name: String(id),
+                    member_count: 0,
+                } as UserFriendElem & UserGroupElem
+            } else {
+                const name = latest.sender?.nickname || String(id)
+                contact = {
+                    user_id: id,
+                    nickname: name,
+                    remark: name,
+                } as UserFriendElem & UserGroupElem
+            }
+            contactStore.userList = [...contactStore.userList, contact]
+        }
         Object.assign(contact, formatMessageData(latest, latest.message_type === 'group'))
         contactStore.baseOnMsgList.set(id, contact)
         restored++
     })
-    if (restored > 0) updateBaseOnMsgList()
+    if (restored > 0) {
+        login.localReady = true
+        updateBaseOnMsgList()
+    }
+    return restored
 }
 
 export function setLoginWaveTimer(timer: any) {
@@ -661,6 +690,7 @@ const msgFunctions = {
             // 完成登陆初始化
             authStore.loginInfo = data
             login.status = true
+            login.localReady = true
 
             // 保存用户信息到连接历史
             saveConnectionToHistory(login.address, login.token, data.uin, data.nickname)
@@ -1595,7 +1625,29 @@ function saveUser(msg: { [key: string]: any }, type: string) {
             hydrateContactPinyinLater(list)
         }
         sortContactListByPinyin(list)
-        contactStore.userList = contactStore.userList.concat(list)
+        // 离线启动时会先用数据库构造最小会话对象；联网取得正式联系人资料后，
+        // 用真实名称/头像所需字段替换它，同时保留本地消息摘要。
+        list.forEach((item) => {
+            const id = Number(item.user_id ?? item.group_id)
+            const cached = contactStore.baseOnMsgList.get(id)
+            if (!cached) return
+            const summary = {
+                raw_msg: cached.raw_msg,
+                raw_msg_base: cached.raw_msg_base,
+                time: cached.time,
+                message_id: cached.message_id,
+                new_msg: cached.new_msg,
+                highlight: cached.highlight,
+                always_top: cached.always_top,
+            }
+            Object.assign(item, summary)
+            contactStore.baseOnMsgList.set(id, item)
+        })
+        const receivedIds = new Set(list.map((item) =>
+            Number(item.user_id ?? item.group_id)))
+        contactStore.userList = contactStore.userList
+            .filter((item) => !receivedIds.has(Number(item.user_id ?? item.group_id)))
+            .concat(list)
         if (settingsStore.sysConfig.session_display_mode === 'all') {
             updateBaseOnMsgList()
         }

@@ -30,7 +30,7 @@
         <div class="main-body">
             <ul :style="{ 'padding-bottom': get('fs_adaptation') > 0 ? `${get('fs_adaptation')}px` : '' }">
                 <li id="bar-home" :class="(tags.page == 'Home' ? 'active' : '') +
-                    (loginInfo.status ? ' hiden-home' : '')"
+                    ((loginInfo.status || loginInfo.localReady) ? ' hiden-home' : '')"
                     @click="changeTab('主页', 'Home', false)">
                     <font-awesome-icon :icon="['fas', 'home']" />
                     <span>{{ $t('主页') }}</span>
@@ -212,7 +212,7 @@
             </div>
         </div>
         <component :is="uiStore.pageView.chatView" v-if="
-            loginInfo.status &&
+            (loginInfo.status || loginInfo.localReady) &&
                 chatStore.chatInfo &&
                 chatStore.chatInfo.show.id != 0"
             v-show="tags.showChat"
@@ -302,7 +302,7 @@ import packageInfo from '../../../package.json'
 import { watch, onMounted, onUnmounted, shallowReactive, shallowRef, provide } from 'vue'
 import { Connector, login as loginInfo, loadConnectionHistory, loadConnectionFromHistory, deleteConnectionHistory, decodeStoredToken } from '@renderer/function/connect'
 import { Logger, popList, PopInfo, LogType } from '@renderer/function/base'
-import { setLoginWaveTimer } from '@renderer/function/msg'
+import { restoreDatabaseSessions, setLoginWaveTimer } from '@renderer/function/msg'
 import { BaseChatInfoElem } from '@renderer/function/elements/information'
 import { useConnectionStore } from '@renderer/state/connection'
 import { useUIStore } from '@renderer/state/ui'
@@ -591,7 +591,7 @@ function changeTab(_: string, view: string, show: boolean) {
     }
 }
 function barMainClick() {
-    if (loginInfo.status) {
+    if (loginInfo.status || loginInfo.localReady) {
         changeTab('信息', 'Messages', true)
     } else {
         changeTab('主页', 'Home', false)
@@ -902,6 +902,20 @@ onMounted(() => {
         loginInfo.address = settingsStore.sysConfig.address
         // 加载连接历史
         loginInfo.connectionHistory = loadConnectionHistory()
+        // OneBot 是否在线不影响本地浏览：优先恢复最近一次账号的 SQLite 会话。
+        if (backend.type === 'tauri' && settingsStore.sysConfig.enable_local_history) {
+            const lastAccount = loginInfo.connectionHistory.find((item) => item.uin)
+            if (lastAccount?.uin) {
+                const restored = await restoreDatabaseSessions(
+                    lastAccount.uin,
+                    lastAccount.nickname,
+                )
+                if (restored > 0) {
+                    tags.page = 'Messages'
+                    tags.showChat = true
+                }
+            }
+        }
         if (
             settingsStore.sysConfig.save_password !== undefined &&
             settingsStore.sysConfig.save_password !== true
@@ -953,7 +967,7 @@ onMounted(() => {
         // 创建 popstate
         if(backend.platform == 'web' && (getDeviceType() === 'Android' || getDeviceType() === 'iOS')) {
             window.addEventListener('popstate', () => {
-                if(!loginInfo.status || uiStore.openSideBar) {
+                if((!loginInfo.status && !loginInfo.localReady) || uiStore.openSideBar) {
                     // 离开提醒
                     const popInfo = {
                         title: $t('提醒'),
