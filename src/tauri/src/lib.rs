@@ -89,7 +89,7 @@ pub fn run() {
             let enable_local_history = store
                 .get("enable_local_history")
                 .map(|v| v.as_bool().unwrap_or_else(|| v.as_str() == Some("true")))
-                .unwrap_or(false);
+                .unwrap_or(true);
 
             app.manage(DbState::new(data_dir, enable_local_history));
 
@@ -266,6 +266,7 @@ pub fn run() {
             commands::db::db_cache_image,
             commands::db::db_get_image,
             commands::db::db_clear_images,
+            commands::db::db_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

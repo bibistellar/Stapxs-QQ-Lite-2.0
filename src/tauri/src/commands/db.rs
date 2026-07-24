@@ -53,6 +53,19 @@ impl DbState {
     }
 }
 
+/// 运行时切换本地历史数据库，无需重启应用。
+/// 关闭时释放连接；再次开启后由下一次读写请求懒加载数据库。
+#[tauri::command]
+pub fn db_set_enabled(state: State<'_, DbState>, enabled: bool) -> Result<(), String> {
+    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
+    inner.enabled = enabled;
+    if !enabled {
+        inner.conn = None;
+    }
+    info!("本地历史消息缓存已{}", if enabled { "启用" } else { "关闭" });
+    Ok(())
+}
+
 // ── 数据结构 ────────────────────────────────────────────────
 
 /// 单条消息记录（前后端共用）

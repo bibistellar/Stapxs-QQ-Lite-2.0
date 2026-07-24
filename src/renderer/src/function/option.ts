@@ -114,8 +114,10 @@ export const optDefault: { [key: string]: any } = {
     close_ga: false,
     open_ga_bot: true,
     record_recent_emoji: '100times' as 'none' | 'order' | '100times' | '500times',
-    enable_local_history: false,
-    mixed_load_messages: false,
+    // Tauri 默认启用本地消息缓存，并采用“本地即时显示 + OneBot 网络校准”。
+    enable_local_history: true,
+    mixed_load_messages: true,
+    local_history_cache_migrated: false,
     disable_local_history_image_cache: false,
     // Dev
     msg_type: 2,
@@ -156,7 +158,8 @@ const configFunction: { [key: string]: (value: any) => void } = {
     session_display_mode: clearGroupAssist,
     use_favicon_notice: setFaviconNotice,
     custom_css: injectCustomCss,
-    opt_ind_message: updateChatPan
+    opt_ind_message: updateChatPan,
+    enable_local_history: setLocalHistoryEnabled,
 }
 
 // =============== 附加设置注册接口 ===============
@@ -234,6 +237,11 @@ function updateChatPan() {
     const chatStore = useChatStore()
     chatStore.chatInfo.show.id = 0
     uiStore.openSideBar = true
+}
+
+function setLocalHistoryEnabled(value: boolean) {
+    if (backend.type !== 'tauri') return
+    backend.call(undefined, 'db:setEnabled', false, { enabled: value })
 }
 
 
@@ -620,6 +628,15 @@ function loadOptData(data: { [key: string]: any }) {
             options[key] = optDefault[key]
         }
     })
+    // 旧版本默认关闭缓存。升级时仅迁移一次，之后尊重用户手动修改的开关。
+    if (options.local_history_cache_migrated !== true) {
+        optChanged = true
+        options.enable_local_history = true
+        options.mixed_load_messages = true
+        options.local_history_cache_migrated = true
+    }
+    // Tauri 的数据库状态由后端持有；每次加载设置都同步一次，首次安装应用默认值时也生效。
+    setLocalHistoryEnabled(options.enable_local_history === true)
     // 删除不存在的设置项
 	const needless: string[] = []
 	for (const key in options) {
