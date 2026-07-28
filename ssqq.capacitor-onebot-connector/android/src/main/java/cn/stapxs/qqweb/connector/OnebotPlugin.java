@@ -47,11 +47,14 @@ public class OnebotPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void connect(PluginCall call) {
+    public synchronized void connect(PluginCall call) {
         String value = call.getString("url");
 
         JSObject ret = new JSObject();
-        webSocketClient = implementation.connect(this, webSocketClient, value);
+        if (webSocketClient != null) {
+            webSocketClient.close();
+        }
+        webSocketClient = implementation.connect(this, value);
         ret.put("success", true);
         call.resolve(ret);
     }
@@ -66,10 +69,25 @@ public class OnebotPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void close(PluginCall call) {
+    public synchronized void close(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("success", implementation.close(webSocketClient));
         call.resolve(ret);
+    }
+
+    /**
+     * 只清理当前持有的连接；被新连接替换的旧 socket 延迟回调时不能覆盖新状态。
+     */
+    public synchronized boolean onWebSocketClosed(WebSocketClient client) {
+        if (webSocketClient == client) {
+            webSocketClient = null;
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized boolean isCurrentWebSocket(WebSocketClient client) {
+        return webSocketClient == client;
     }
 
     @PluginMethod

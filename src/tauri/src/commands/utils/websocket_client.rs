@@ -128,6 +128,13 @@ impl WebSocketClient {
                     _ => {}
                 }
             }
+
+            // TCP/TLS 流可能在没有 Close 帧和显式错误的情况下结束。此前这种情况
+            // 不会上报渲染层，客户端会一直把已经失效的连接当作在线。
+            if is_active_recv.swap(false, Ordering::SeqCst) {
+                let mut cb = on_close_recv.lock().unwrap();
+                cb(CloseCode::Abnormal, Utf8Bytes::from("stream ended"));
+            }
         });
 
         Ok(Self {

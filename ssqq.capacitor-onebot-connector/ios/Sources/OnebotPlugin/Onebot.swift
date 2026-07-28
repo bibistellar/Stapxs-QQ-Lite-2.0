@@ -10,23 +10,25 @@ import os
     var onOptionEvent: ((String, String) -> Void)?
 
     private var client: WebSocketClient?
+    private var connectionGeneration = 0
 
     @objc public func connect(_ url: String) {
-
         let url = URL(string: url)!
-        if(client != nil) {
-            client?.disconnect()
-        }
+        connectionGeneration += 1
+        let generation = connectionGeneration
+        client?.disconnect()
+        let nextClient = WebSocketClient(url: url, onEvent: { [weak self] type, data in
+            // 被新连接替换的旧 task 可能延迟回调，不能让它覆盖当前连接状态。
+            if let self, generation == self.connectionGeneration, let onEvent = self.onEvent {
+                onEvent(type, data)
+            }
+        })
+        // 在异步 resume 前先替换引用，避免短时间内多次 connect 创建并行连接。
+        self.client = nextClient
+
         // 使用 GCD 创建 WebSocket 连接
         DispatchQueue.global().async {
-            let client = WebSocketClient(url: url, onEvent: { type, data in
-                if let onEvent = self.onEvent {
-                    onEvent(type, data)
-                }
-            })
-            client.connect()
-            // 全局保存 client 对象，避免被销毁
-            self.client = client
+            nextClient.connect()
         }
     }
 

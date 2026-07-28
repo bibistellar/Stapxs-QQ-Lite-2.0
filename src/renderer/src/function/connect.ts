@@ -22,29 +22,42 @@ import { backend } from '@renderer/runtime/backend'
 import { useSettingsStore } from '@renderer/state/settings'
 import { useAuthStore } from '@renderer/state/auth'
 import { useConnectionStore } from '@renderer/state/connection'
+import type { ConnectionAddress } from './connectionUrl'
+import {
+    resolveConnectionAddress,
+    toInsecureWebSocketAddress,
+} from './connectionUrl'
 
 const logger = new Logger()
 const popInfo = new PopInfo()
 
-let retry = 0
 let forceCloseReason: string | undefined = undefined
 
 // 断线自动重连状态 =====================================================
-// PS：wantConnected 表示「已经成功连过、期望保持连接」。它只在成功握手后置 true，
+// PS：wantConnected 表示「已经成功连过、期望保持连接」。它在成功握手后置 true，
 //     在用户主动断开时置 false。掉线重连、唤醒/联网重连都以它为准，这样即便多次
 //     重连失败也能一直沿着退避节奏重试，而不需要用户手动再点一次登录。
 let reconnectTimer: number | undefined = undefined
 let reconnectAttempts = 0
 let wantConnected = false
+let connectionTarget: (ConnectionAddress & {
+    token: string
+    fallbackAttempted: boolean
+}) | undefined = undefined
 let lifecycleHooksBound = false
 let lastReconnectNow = 0
 let healthCheckTimer: number | undefined = undefined
 let healthCheckRunning = false
 let healthCheckFailures = 0
+let lastInboundAt = 0
+let connectTimeoutTimer: number | undefined = undefined
+let connectionAttempt = 0
 // 退避上限 30s；每次失败翻倍，成功后归零
 const RECONNECT_MAX_DELAY = 30000
 // 唤醒/联网事件去抖，避免多个事件在同一时刻重复触发重连
 const RECONNECT_NOW_DEBOUNCE = 3000
+// 实测 CDN / 反代的 TLS + Upgrade 偶尔会超过 10 秒
+const CONNECT_UI_TIMEOUT = 20000
 const HEALTH_CHECK_INTERVAL = 30000
 const HEALTH_CHECK_TIMEOUT = 10000
 const HEALTH_CHECK_FAILURE_LIMIT = 2
@@ -59,8 +72,7 @@ function stopHealthCheck() {
 }
 
 export let websocket: WebSocket | undefined = undefined
-const WS_PROTOCOL = 'ws' + '://'
-const WSS_PROTOCOL = 'wss' + '://'
+let eventSource: EventSource | undefined = undefined
 
 function parseUrl(url: string) {
     try {
@@ -116,40 +128,12 @@ function normalizeConnectionHistory(history: unknown[]) {
     })
 }
 
-function withWebSocketProtocol(address: string, secure: boolean) {
-    return `${secure ? WSS_PROTOCOL : WS_PROTOCOL}${address}`
-}
-
-// 本地/局域网地址（IPv4、IPv6、localhost），这类地址默认使用明文 ws
-const LOCAL_ADDRESS_REG =
-    /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?([/?#]|$)/i
-
-/**
- * 把 http(s) 协议的地址转换为 ws(s)
- * PS：用户经常会直接粘贴 OneBot 的 http 地址，此时不能把它当作“没有协议”再拼一个 ws://，
- *     否则会得到 ws://https://... 这种非法地址（浏览器会报 scheme 错误）
- */
-function normalizeProtocol(address: string) {
-    if (address.startsWith('https://'))
-        return WSS_PROTOCOL + address.slice('https://'.length)
-    if (address.startsWith('http://'))
-        return WS_PROTOCOL + address.slice('http://'.length)
-    return address
-}
-
-/**
- * 补全缺失的 ws(s) 协议
- * PS：后端连接模式下地址会被原样交给后端解析（Tauri 使用 http::Uri），
- *     缺少协议会直接解析失败，所以发给后端前必须补全
- */
-function withDefaultProtocol(address: string) {
-    if (
-        address.startsWith(WS_PROTOCOL) ||
-        address.startsWith(WSS_PROTOCOL)
-    ) {
-        return address
+function finishConnectionAttempt() {
+    if (connectTimeoutTimer) {
+        clearTimeout(connectTimeoutTimer)
+        connectTimeoutTimer = undefined
     }
-    return withWebSocketProtocol(address, !LOCAL_ADDRESS_REG.test(address))
+    login.creating = false
 }
 
 class TimeoutError extends Error {
@@ -169,41 +153,63 @@ export class Connector {
     static create(
         address: string,
         token?: string,
-        wss: boolean | undefined = undefined,
     ) {
         const { $t } = app.config.globalProperties
-        const settingsStore = useSettingsStore()
-        login.creating = true
-
-        // 设置连接超时保护
-        window.setTimeout(() => {
-            if (login.creating) {
-                login.creating = false
-            }
-        }, 10000)
-
-        logger.add(LogType.WS, '当前处于 ALL 日志模式。连接器将输出全部收发消息 ……')
-
-        // 把 http(s) 地址转换为 ws(s)
-        address = normalizeProtocol(address)
-
-        // 确保 address 包含路径部分，避免部分服务器因 HTTP 请求路径为空而返回 400
-        const withoutProtocol = address.replace(/^(wss?|https?):(\/\/)/, '')
-        if (!withoutProtocol.includes('/')) {
-            address = address + '/'
+        let resolved: ConnectionAddress
+        try {
+            resolved = resolveConnectionAddress(address)
+        } catch (e) {
+            finishConnectionAttempt()
+            const message = e instanceof Error ? e.message : $t('未知错误')
+            logger.error(e as Error, '连接地址解析失败')
+            popInfo.add(PopType.ERR, $t('连接失败') + ': ' + message, false)
+            return
         }
 
-        // 记录当前连接目标，供唤醒/联网后的自动重连使用
-        login.address = address
+        // 用户发起新的连接时重置协议回退状态。preferredAddress 始终用于输入框、
+        // 自动连接和历史记录；transportAddress 只描述当前 socket 实际使用的地址。
+        connectionTarget = {
+            ...resolved,
+            token: token ?? '',
+            fallbackAttempted: false,
+        }
+        login.address = resolved.preferredAddress
         login.token = token ?? ''
+        wantConnected = false
+        reconnectAttempts = 0
+        this.openCurrentTarget()
+    }
 
-        // Electron 默认使用后端连接模式
+    private static openCurrentTarget() {
+        if (!connectionTarget) return
+
+        const { $t } = app.config.globalProperties
+        const address = connectionTarget.transportAddress
+        const token = connectionTarget.token
+        const attempt = ++connectionAttempt
+
+        login.creating = true
+        if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer)
+        connectTimeoutTimer = window.setTimeout(() => {
+            if (attempt === connectionAttempt && login.creating) {
+                login.creating = false
+                logger.add(LogType.WS, `连接握手超过 ${CONNECT_UI_TIMEOUT / 1000}s，继续等待底层结果`)
+            }
+        }, CONNECT_UI_TIMEOUT)
+
+        logger.add(LogType.WS, '当前处于 ALL 日志模式。连接器将输出全部收发消息 ……')
+        logger.add(LogType.WS, `正在连接到：${address}`)
+
+        // 桌面与移动端默认使用原生后端连接模式
         if (!backend.isWeb()) {
             logger.add(LogType.WS, '使用后端连接模式')
-            // PS：后端拿到的必须是带协议的完整地址，否则无法解析
-            const backendAddress = withDefaultProtocol(address)
-            backend.call('Onebot', 'onebot:connect', false,
-                backend.isDesktop() ?  { address: backendAddress, token: token, } : { url: appendAccessToken(backendAddress, token) })
+            let args: { address: string, token: string } | { url: string }
+            if (backend.isDesktop()) {
+                args = { address, token }
+            } else {
+                args = { url: appendAccessToken(address, token) }
+            }
+            backend.call('Onebot', 'onebot:connect', false, args)
             return
         }
 
@@ -218,65 +224,49 @@ export class Connector {
             }
             logger.add(LogType.WS, '使用 SSE 连接模式')
             const sse = new EventSource(appendAccessToken(import.meta.env.VITE_APP_SSE_EVENT_ADDRESS, token))
+            eventSource?.close()
+            eventSource = sse
             sse.onopen = () => {
-                login.creating = false
+                if (eventSource !== sse) return
                 this.onopen(address, token)
             }
             sse.onmessage = (e) => {
+                if (eventSource !== sse) return
                 this.onmessage(e.data)
             }
             sse.onerror = () => {
-                login.creating = false
+                if (eventSource !== sse) return
+                finishConnectionAttempt()
                 popInfo.add(PopType.ERR, $t('连接不稳定'))
                 return
             }
             return
         } else {
-            // PS：只有在未设定 wss 类型的情况下才认为是首次连接
-            if (wss == undefined) {
-                retry = 0
-            } else {
-                retry++
-            }
-            // 最多自动重试连接五次
-            if (retry > 5) {
-                login.creating = false
+            if (websocket && websocket.readyState !== WebSocket.CLOSED) {
+                logger.add(LogType.WS, '已有连接正在建立或关闭，忽略重复连接请求')
                 return
             }
 
-            let url = appendAccessToken(withWebSocketProtocol(address, false), token)
-            if (address.startsWith(WS_PROTOCOL) || address.startsWith(WSS_PROTOCOL)) {
-                url = appendAccessToken(address, token)
-            } else if (wss == undefined) {
-                // 判断连接类型
-                if (document.location.protocol == 'https:') {
-                    // 判断连接 URL 的协议，https 优先尝试 wss
-                    settingsStore.connectSsl = true
-                    url = appendAccessToken(withWebSocketProtocol(address, true), token)
-                }
-            } else {
-                url = appendAccessToken(withWebSocketProtocol(address, true), token)
-            }
+            const url = appendAccessToken(address, token)
+            const currentSocket = new WebSocket(url)
+            websocket = currentSocket
 
-            if (!websocket) {
-                websocket = new WebSocket(url)
-            }
-
-            websocket.onopen = () => {
-                login.creating = false
+            currentSocket.onopen = () => {
+                if (websocket !== currentSocket) return
                 this.onopen(address, token)
             }
-            websocket.onmessage = (e) => {
+            currentSocket.onmessage = (e) => {
+                if (websocket !== currentSocket) return
                 this.onmessage(e.data)
             }
-            websocket.onclose = (e) => {
-                login.creating = false
+            currentSocket.onclose = (e) => {
+                if (websocket !== currentSocket) return
                 const reason = forceCloseReason ?? e.reason
                 forceCloseReason = undefined
                 this.onclose(e.code, reason, address, token)
             }
-            websocket.onerror = (e) => {
-                login.creating = false
+            currentSocket.onerror = (e) => {
+                if (websocket !== currentSocket) return
                 if (e instanceof ErrorEvent) {
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + e.message)
                 } else {
@@ -288,8 +278,9 @@ export class Connector {
 
     // 连接事件 =====================================================
 
-    static onopen(address: string, token: string | undefined) {
+    static onopen(_address: string, token: string | undefined) {
         const settingsStore = useSettingsStore()
+        finishConnectionAttempt()
         logger.add(LogType.WS, '连接成功')
         // 握手成功：进入「期望保持连接」状态，清空重连退避
         wantConnected = true
@@ -300,7 +291,9 @@ export class Connector {
         }
         this.startHealthCheck()
         // 保存登录信息
-        Option.save('address', address)
+        // 后端回传的是实际 transport 地址；持久化时仍使用用户首选地址，
+        // 避免一次自动 ws 回退覆盖显式/无协议输入。
+        Option.save('address', login.address)
         // 保存密钥
         if (
             settingsStore.sysConfig.save_password &&
@@ -323,7 +316,14 @@ export class Connector {
     }
 
     static onmessage(message: string) {
-        const data = JSON.parse(message)
+        lastInboundAt = Date.now()
+        let data: any
+        try {
+            data = JSON.parse(message)
+        } catch (e) {
+            logger.error(e as Error, '收到无法解析的 WebSocket 消息')
+            return
+        }
         logger.add(LogType.WS, 'GET：', data)
         if (data.echo === undefined){
             dispatch(data)
@@ -373,8 +373,8 @@ export class Connector {
     static onclose(
         code: number,
         msg: string | undefined,
-        address: string,
-        token: string | undefined,
+        _address?: string,
+        _token?: string,
     ) {
         const { $t } = app.config.globalProperties
         const connectionStore = useConnectionStore()
@@ -384,8 +384,14 @@ export class Connector {
             connectionStore.metaEventWatchTimer = undefined
         }
         connectionStore.metaEventTimeoutTriggered = false
+        connectionStore.heartbeatTime = -1
+        connectionStore.oldHeartbeatTime = -1
+        connectionStore.lastHeartbeatTime = -1
         stopHealthCheck()
+        finishConnectionAttempt()
         websocket = undefined
+        login.status = false
+        login.localReady = Boolean(useAuthStore().loginInfo?.uin)
         updateMenu({ parent: 'account', id: 'logout', action: 'visible', value: 'false' })
         updateMenu({ parent: 'account', id: 'userName', action: 'label', value: $t('连接') })
 
@@ -393,47 +399,68 @@ export class Connector {
             case 1000:
                 if (wantConnected) {
                     logger.add(LogType.WS, '连接被远端关闭，准备自动重连')
-                    this.scheduleReconnect(address, token)
+                    this.scheduleReconnect()
                 } else {
                     popInfo.add(PopType.INFO, $t('连接已断开') + (msg ? (': ' + msg.replace(':', ' - ')) : ''), false)
                 }
                 break // 正常关闭
+            case -1:
             case 1006: {
                 // 非正常关闭，尝试重连
                 if (wantConnected) {
                     // 曾经连上过：说明是掉线（网络波动 / 服务端重启 / 睡眠唤醒），
                     // 按退避节奏无限重连，不再需要用户手动重新登录
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
-                    this.scheduleReconnect(address, token)
-                } else {
-                    // 从未连上过（首次连接失败）：保持原有协议回退逻辑，尝试明文 ws
+                    this.scheduleReconnect()
+                } else if (!this.tryInsecureProtocolFallback()) {
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
-                    this.create(address, token, false)
                 }
                 break
             }
             case 1015: {
                 // TLS 错误
-                popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
                 if (wantConnected) {
-                    this.scheduleReconnect(address, token)
-                } else {
-                    // 首次连接的 TLS 错误：尝试使用 ws 连接
-                    this.create(address, token, false)
+                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
+                    this.scheduleReconnect()
+                } else if (!this.tryInsecureProtocolFallback()) {
+                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
                 }
                 break
             }
             default: {
-                login.creating = false
                 popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('未知的错误 {code}',{ code: code }), false)
-                this.scheduleReconnect(address, token)
+                if (wantConnected) this.scheduleReconnect()
             }
         }
 
         logger.error(null, $t('连接失败') + ': ' + code)
-        login.creating = false
-        login.status = false
-        login.localReady = Boolean(useAuthStore().loginInfo?.uin)
+    }
+
+    /**
+     * 只有用户未填写协议的公网地址才允许首次 wss 失败后回退一次 ws。
+     * 显式输入的 wss 永远不会在客户端被降级。
+     */
+    private static tryInsecureProtocolFallback() {
+        if (
+            !connectionTarget ||
+            !connectionTarget.allowInsecureFallback ||
+            connectionTarget.fallbackAttempted
+        ) {
+            return false
+        }
+
+        const fallbackAddress =
+            toInsecureWebSocketAddress(connectionTarget.transportAddress)
+        if (fallbackAddress === connectionTarget.transportAddress) return false
+
+        connectionTarget.transportAddress = fallbackAddress
+        connectionTarget.fallbackAttempted = true
+        logger.add(LogType.WS, '未指定协议的 wss 首次握手失败，尝试回退到 ws')
+        const target = connectionTarget
+        window.setTimeout(() => {
+            if (connectionTarget === target) this.openCurrentTarget()
+        }, 0)
+        return true
     }
 
     // 连接器操作 =====================================================
@@ -450,8 +477,12 @@ export class Connector {
         connectionStore.metaEventTimeoutTriggered = false
         forceCloseReason = undefined
         stopHealthCheck()
+        finishConnectionAttempt()
+        eventSource?.close()
+        eventSource = undefined
         // 用户主动断开：停止自动重连
         wantConnected = false
+        connectionTarget = undefined
         reconnectAttempts = 0
         if (reconnectTimer) {
             clearTimeout(reconnectTimer)
@@ -490,20 +521,16 @@ export class Connector {
             websocket.close(4000, reason)
             return
         }
-        this.onclose(1006, reason, login.address, login.token)
+        this.onclose(1006, reason)
     }
 
     /**
-     * 掉线后按指数退避排期重连（2s、4s、8s…，上限 30s，成功后归零）
-     * PS：只在「曾经连上过」（wantConnected）时启用，避免和首次连接的协议回退冲突。
-     *     Electron 后端掉线时上报的是 code -1 并自行重连，不会走到这里，因此不会重复重连。
+     * 掉线后按指数退避排期重连（1s、2s、4s…，上限 30s，成功后归零）。
+     * 所有平台只由这一层调度，避免原生连接器与渲染层重复重连。
      */
-    static scheduleReconnect(address: string, token: string | undefined) {
-        if (!wantConnected) return
+    static scheduleReconnect() {
+        if (!wantConnected || !connectionTarget) return
         if (reconnectTimer) return
-        // PS：onclose 会在 switch 之后才把 login.status 置 false，所以这里不能用
-        //     login.status 作为门槛（此刻它可能还是 true）；实际的连接状态判断放到
-        //     定时器回调里，届时状态已经稳定。
         const delay = Math.min(
             RECONNECT_MAX_DELAY,
             1000 * Math.pow(2, reconnectAttempts),
@@ -513,7 +540,7 @@ export class Connector {
         reconnectTimer = window.setTimeout(() => {
             reconnectTimer = undefined
             if (!wantConnected || login.status || login.creating) return
-            this.create(address, token, undefined)
+            this.openCurrentTarget()
         }, delay)
     }
 
@@ -523,7 +550,7 @@ export class Connector {
      *     保持连接」且当前未连接，就重置退避立即重连，无需等待下一次退避 tick。
      */
     static reconnectNow() {
-        if (!wantConnected) return
+        if (!wantConnected || !connectionTarget) return
         if (login.status || login.creating) return
         const now = Date.now()
         if (now - lastReconnectNow < RECONNECT_NOW_DEBOUNCE) return
@@ -534,7 +561,7 @@ export class Connector {
         }
         reconnectAttempts = 0
         logger.add(LogType.WS, '检测到网络恢复 / 窗口唤醒，立即尝试重连 ……')
-        this.create(login.address, login.token, undefined)
+        this.openCurrentTarget()
     }
 
     /**
@@ -563,6 +590,7 @@ export class Connector {
             if (!wantConnected || !login.status || healthCheckRunning) return
             healthCheckRunning = true
             const echo = 'health_' + uuid()
+            const probeStartedAt = Date.now()
             try {
                 this.sendRaw('get_status', {}, echo)
                 // 只要服务端有响应就说明链路可用；不要求具体 OneBot 实现支持此 API。
@@ -570,10 +598,17 @@ export class Connector {
                 healthCheckFailures = 0
             } catch (e) {
                 this.ReMap.delete(echo)
-                healthCheckFailures++
-                logger.add(LogType.WS, `连接探针超时（${healthCheckFailures}/${HEALTH_CHECK_FAILURE_LIMIT}）`)
-                if (healthCheckFailures >= HEALTH_CHECK_FAILURE_LIMIT) {
-                    this.forceDisconnect('连接状态轮询超时')
+                // 探针期间仍有任何入站帧，说明 WebSocket 链路本身可用。
+                // 部分 OneBot 实现可能不响应 get_status，此时不能误断连接。
+                if (lastInboundAt >= probeStartedAt) {
+                    healthCheckFailures = 0
+                    logger.add(LogType.WS, '连接探针未响应，但期间仍收到消息，保持连接')
+                } else {
+                    healthCheckFailures++
+                    logger.add(LogType.WS, `连接探针超时（${healthCheckFailures}/${HEALTH_CHECK_FAILURE_LIMIT}）`)
+                    if (healthCheckFailures >= HEALTH_CHECK_FAILURE_LIMIT) {
+                        this.forceDisconnect('连接状态轮询超时')
+                    }
                 }
             } finally {
                 healthCheckRunning = false

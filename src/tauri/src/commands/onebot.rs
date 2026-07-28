@@ -7,6 +7,7 @@ use tungstenite::protocol::frame::coding::CloseCode;
 use crate::commands::utils::websocket_client::WebSocketClient;
 
 static WS_CLIENT: Lazy<Mutex<Option<WebSocketClient>>> = Lazy::new(|| Mutex::new(None));
+static WS_TARGET: Lazy<Mutex<Option<(String, String)>>> = Lazy::new(|| Mutex::new(None));
 
 #[command]
 pub async fn onebot_connect(
@@ -15,14 +16,10 @@ pub async fn onebot_connect(
     token: &str,
 ) -> Result<(), String> {
     {
-        let client = WS_CLIENT.lock().unwrap();
-        if client.is_some() {
-            info!("已有连接，跳过创建");
-            let mut payload = HashMap::new();
-            payload.insert("address", address.to_string());
-            payload.insert("token", token.to_string());
-            app_handle.emit("onebot:onopen", payload).unwrap();
-            return Ok(());
+        let mut client = WS_CLIENT.lock().unwrap();
+        if let Some(existing) = client.take() {
+            info!("已有连接，关闭后替换");
+            let _ = existing.close();
         }
     }
 
@@ -39,9 +36,19 @@ pub async fn onebot_connect(
         return Err(message);
     }
 
-    let url = format!("{}?access_token={}", address, token);
+    let separator = if address.contains('?') { "&" } else { "?" };
+    let url = format!(
+        "{}{}access_token={}",
+        address,
+        separator,
+        urlencoding::encode(token)
+    );
     let address = address.to_string();
     let token = token.to_string();
+    {
+        let mut target = WS_TARGET.lock().unwrap();
+        *target = Some((address.clone(), token.clone()));
+    }
 
     let app_handle_open = app_handle.clone();
     let app_handle_msg = app_handle.clone();
@@ -70,6 +77,10 @@ pub async fn onebot_connect(
                 let mut client = WS_CLIENT.lock().unwrap();
                 *client = None;
             }
+            {
+                let mut target = WS_TARGET.lock().unwrap();
+                *target = None;
+            }
             let mut payload = HashMap::new();
             payload.insert("code", code.to_string());
             payload.insert("message", reason.to_string());
@@ -82,9 +93,13 @@ pub async fn onebot_connect(
     .map_err(|e| {
         error!("连接失败: {}", e);
         let mut payload = HashMap::new();
-        payload.insert("code", 1000.to_string());
+        payload.insert("code", 1006.to_string());
         payload.insert("message", e.to_string());
+        payload.insert("address", address.clone());
+        payload.insert("token", token.clone());
         let _ = app_handle.emit("onebot:onclose", payload);
+        let mut target = WS_TARGET.lock().unwrap();
+        *target = None;
         e.to_string()
     })?;
 
@@ -106,17 +121,18 @@ pub fn onebot_send(data: &str) -> Result<(), String> {
 #[command]
 pub fn onebot_close(app_handle: AppHandle) -> Result<(), String> {
     let mut client = WS_CLIENT.lock().unwrap();
-    if let Some(ws_client) = &*client {
+    if let Some(ws_client) = client.take() {
         ws_client.close().map_err(|e| e.to_string())?;
-        *client = None;
-
-        info!("连接主动关闭");
-        let mut payload = HashMap::new();
-        payload.insert("code", 1000.to_string());
-        payload.insert("message", "".to_string());
-        let _ = app_handle.emit("onebot:onclose", payload);
-        Ok(())
-    } else {
-        Err("WebSocketClient not initialized".to_string())
     }
+
+    info!("连接主动关闭");
+    let mut payload = HashMap::new();
+    payload.insert("code", 1000.to_string());
+    payload.insert("message", "".to_string());
+    if let Some((address, token)) = WS_TARGET.lock().unwrap().take() {
+        payload.insert("address", address);
+        payload.insert("token", token);
+    }
+    let _ = app_handle.emit("onebot:onclose", payload);
+    Ok(())
 }

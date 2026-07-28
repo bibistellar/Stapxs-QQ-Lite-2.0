@@ -24,11 +24,6 @@ class WebSocketClient: NSObject, URLSessionDelegate {
     private var address: String
     private var token: String?
 
-    // 重试相关
-    private var retryAttempts = 0
-    private let maxRetryAttempts = 4
-    private let retryDelay: TimeInterval = 5.0
-
     init(url: URL, onEvent: @escaping (String, String) -> Void) {
         self.url = url
         self.onEvent = onEvent
@@ -36,7 +31,9 @@ class WebSocketClient: NSObject, URLSessionDelegate {
         // ws://192.168.99.100:3001/?token=123456
         self.address = self.url.absoluteString
         if let urlComponents = URLComponents(url: self.url, resolvingAgainstBaseURL: false) {
-            self.token = urlComponents.queryItems?.first(where: { $0.name == "token" })?.value
+            self.token = urlComponents.queryItems?.first(where: {
+                $0.name == "access_token" || $0.name == "token"
+            })?.value
         }
 
         // 配置 URLSession 以支持后台模式
@@ -95,11 +92,7 @@ class WebSocketClient: NSObject, URLSessionDelegate {
         // 恢复正常心跳间隔
         startHeartbeat(interval: 30.0) // 每30秒发送一次心跳
 
-        // 检查连接状态
-        if !isConnected {
-            logger.info("前台检测到未连接，尝试重连")
-            connect()
-        }
+        // 重连统一由渲染层的生命周期状态机负责，原生层只上报连接状态。
     }
 
     @objc private func handleBackgroundRefresh() {
@@ -133,12 +126,8 @@ class WebSocketClient: NSObject, URLSessionDelegate {
         webSocketTask?.sendPing { [weak self] error in
             if let error = error {
                 self?.logger.error("心跳发送失败: \(error.localizedDescription)")
-                // 心跳失败，可能需要重连
-                if self?.isInBackground == false {
-                    self?.logger.info("心跳失败，尝试重连")
-                    self?.isConnected = false
-                    self?.connect()
-                }
+                self?.isConnected = false
+                self?.webSocketTask?.cancel(with: .goingAway, reason: nil)
             } else {
                 self?.logger.debug("心跳发送成功")
             }
@@ -158,7 +147,6 @@ class WebSocketClient: NSObject, URLSessionDelegate {
 
             if error == nil {
                 self.logger.info("连接成功")
-                retryAttempts = 0
                 // 拼为 json 字符串
                 let data = try! JSONSerialization.data(
                     withJSONObject: ["address": self.address, "token": self.token], options: [])
@@ -239,20 +227,6 @@ class WebSocketClient: NSObject, URLSessionDelegate {
             self.onEvent("onclose", String(data: data, encoding: .utf8)!)
         }
 
-        // 根据应用状态决定是否重连
-        if code != 1000 && !isInBackground {
-            // 仅在前台时主动重连
-            if retryAttempts < maxRetryAttempts {
-                retryAttempts += 1
-                logger.info("重试连接 (\(self.retryAttempts)/\(self.maxRetryAttempts))...")
-                DispatchQueue.global().asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-                    self?.connect()
-                }
-            } else {
-                logger.error("达到最大重试次数，放弃连接")
-            }
-        } else if isInBackground {
-            logger.info("后台模式下连接失败，等待前台时重连")
-        }
+        // 重连统一由渲染层处理，避免原生层和前端同时创建多个 socket。
     }
 }

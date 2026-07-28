@@ -12,7 +12,7 @@ export class Connector {
 
     private win: BrowserWindow
     private websocket: WebSocket | undefined
-    private connectionOpened = false
+    private pendingConnection: { url: string, token: string } | undefined
 
     constructor(win: BrowserWindow) {
         this.logger.level = logLevel
@@ -22,8 +22,8 @@ export class Connector {
             this.websocket?.send(json)
         })
         ipcMain.on('onebot:close', () => {
+            this.pendingConnection = undefined
             this.websocket?.close(1000)
-            this.websocket = undefined
         })
         this.logger.info('后端连接器已初始化')
     }
@@ -37,55 +37,60 @@ export class Connector {
         } else if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
             url = 'wss://' + url
         }
-        // 确保 URL 包含路径部分，避免部分服务器因 HTTP 请求路径为空而返回 400
-        const withoutProtocol = url.replace(/^wss?:\/\//, '')
-        if (!withoutProtocol.includes('/')) {
-            url = url + '/'
-        }
+        const parsedUrl = new URL(url)
+        const connection = { url: parsedUrl.toString(), token }
 
-        if (!this.websocket) {
-            this.logger.info('正在连接到：', url)
-            this.websocket = new WebSocket(`${url}?access_token=${encodeURIComponent(token)}`)
-        } else {
-            // 如果前端发起了连接请求，说明前端在未连接状态；断开已有连接，重新连接
-            // PS：这种情况一般不会发生，大部分情况是因为 debug 模式前端热重载导致的
+        if (this.websocket) {
+            // close 是异步的，不能在 socket 仍存在时递归 connect，否则会栈溢出。
+            // 只保留最新目标，待旧连接 close 后再创建。
+            this.pendingConnection = connection
             this.websocket.close(1000)
-            this.connect(url, token)
+            return
         }
 
-        this.websocket.onopen = () => {
-            this.connectionOpened = true
-            this.logger.info('已成功连接到', url)
+        this.open(connection)
+    }
+
+    private open(connection: { url: string, token: string }) {
+        const { url, token } = connection
+        this.logger.info('正在连接到：', new URL(url).origin)
+        const socketUrl = new URL(url)
+        socketUrl.searchParams.set('access_token', token)
+        const socket = new WebSocket(socketUrl)
+        this.websocket = socket
+
+        socket.onopen = () => {
+            if (this.websocket !== socket) return
+            this.logger.info('已成功连接到', new URL(url).origin)
             this.win.webContents.send('onebot:onopen', {
                 address: url,
-                token: token,
+                token,
             })
         }
-        this.websocket.onmessage = (e) => {
+        socket.onmessage = (e) => {
+            if (this.websocket !== socket) return
             this.win.webContents.send('onebot:onmessage', e.data)
         }
-        this.websocket.onclose = (e) => {
+        socket.onclose = (e) => {
+            if (this.websocket !== socket) return
             this.websocket = undefined
 
             this.logger.info('连接已关闭，代码：', e.code)
-            let retryUrl = url
-            // 仅首次握手失败时尝试另一种协议；已经成功过的连接掉线后保持原协议，
-            // 避免把正常的 wss 连接意外降级成 ws。
-            if (!this.connectionOpened && e.code === 1006) {
-                retryUrl = url.startsWith('wss://')
-                    ? 'ws://' + url.slice('wss://'.length)
-                    : 'wss://' + url.slice('ws://'.length)
+            if (this.pendingConnection) {
+                const pending = this.pendingConnection
+                this.pendingConnection = undefined
+                this.open(pending)
+                return
             }
-            // 重连策略统一由渲染进程管理，避免前后端同时重试形成重复连接。
+
             this.win.webContents.send('onebot:onclose', {
                 code: e.code,
                 message: e.reason,
-                address: retryUrl,
-                token: token,
+                address: url,
+                token,
             })
         }
-        this.websocket.onerror = (e) => {
-            this.websocket = undefined
+        socket.onerror = (e) => {
             this.logger.error('连接错误：', e)
         }
     }

@@ -29,6 +29,7 @@ public class WebSocketClient {
         this.plugin = plugin;
         client = new OkHttpClient.Builder()
             .readTimeout(0, TimeUnit.MILLISECONDS) // 保持连接
+            .pingInterval(30, TimeUnit.SECONDS)
             .build();
     }
 
@@ -55,7 +56,8 @@ public class WebSocketClient {
                 String[] params = query.split("&");
                 for (String param : params) {
                     String[] keyValue = param.split("=");
-                    if (keyValue.length == 2 && keyValue[0].equals("token")) {
+                    if (keyValue.length == 2 &&
+                        (keyValue[0].equals("access_token") || keyValue[0].equals("token"))) {
                         token = keyValue[1];
                         break;
                     }
@@ -72,6 +74,10 @@ public class WebSocketClient {
             public void onOpen(
                 @NonNull WebSocket webSocket,
                 @NonNull Response response) {
+                if (!plugin.isCurrentWebSocket(WebSocketClient.this)) {
+                    webSocket.close(1000, "连接已被替换");
+                    return;
+                }
                 JSObject ret = new JSObject();
                 ret.put("address", address);
                 ret.put("token", token);
@@ -82,7 +88,9 @@ public class WebSocketClient {
             public void onMessage(
                 @NonNull WebSocket webSocket,
                 @NonNull String text) {
-                plugin.sendNotify("onmessage", text);
+                if (plugin.isCurrentWebSocket(WebSocketClient.this)) {
+                    plugin.sendNotify("onmessage", text);
+                }
             }
 
             @Override
@@ -90,7 +98,9 @@ public class WebSocketClient {
                 @NonNull WebSocket webSocket,
                 int code, @NonNull String reason) {
                 Log.d("Onebot", "WebSocket已关闭: " + code + " / " + reason);
-                closeBack(code, "WebSocket已关闭: " + code + " / " + reason);
+                if (plugin.onWebSocketClosed(WebSocketClient.this)) {
+                    closeBack(code, "WebSocket已关闭: " + code + " / " + reason);
+                }
             }
 
             @Override
@@ -98,7 +108,9 @@ public class WebSocketClient {
                 @NonNull WebSocket webSocket,
                 @NonNull Throwable t, Response response) {
                 Log.d("Onebot", "WebSocket连接失败: " + t.getMessage());
-                closeBack(-1, "WebSocket连接失败: " + t.getMessage());
+                if (plugin.onWebSocketClosed(WebSocketClient.this)) {
+                    closeBack(-1, "WebSocket连接失败: " + t.getMessage());
+                }
             }
         });
     }

@@ -71,6 +71,11 @@ import { useConnectionStore } from '@renderer/state/connection'
 import { useStickerStore } from '@renderer/state/sticker'
 import { useUIStore } from '@renderer/state/ui'
 import { useSettingsStore } from '@renderer/state/settings'
+import {
+    getHeartbeatIntervalSeconds,
+    getHeartbeatTimeoutMs,
+    isOneBotHeartbeat,
+} from './connectionHealth'
 
 const popInfo = new PopInfo()
 // eslint-disable-next-line
@@ -86,8 +91,8 @@ if (msgPathAt != undefined) {
 // 其他 tag
 let listLoadTimes = 0
 const logger = new Logger()
-let firstHeartbeatTime = -1
-let heartbeatTime = -1
+let lastHeartbeatReceivedAt = -1
+let heartbeatIntervalSeconds = -1
 let loginWaveTimer: any = null
 const RECENT_HISTORY_SECONDS = 24 * 60 * 60
 const RECENT_HISTORY_COUNT = 200
@@ -303,13 +308,14 @@ function refreshMetaEventWatchdog(interval: number) {
     }
 
     connectionStore.metaEventTimeoutTriggered = false
+    const timeout = getHeartbeatTimeoutMs(interval)
     connectionStore.metaEventWatchTimer = setTimeout(() => {
         if (connectionStore.metaEventTimeoutTriggered) return
         connectionStore.metaEventTimeoutTriggered = true
         connectionStore.metaEventWatchTimer = undefined
         logger.add(LogType.WS, '心跳包超时，准备断开连接')
         Connector.forceDisconnect('心跳包超时')
-    }, interval * 1000)
+    }, timeout)
 }
 
 export function dispatch(raw: string | { [k: string]: any }, echo?: string) {
@@ -349,29 +355,35 @@ const noticeFunctions = {
      * 心跳包
      */
     meta_event: (_: string, msg: { [key: string]: any }) => {
+        // lifecycle 等元事件不是心跳。把它们参与周期计算会在后端建连时
+        // 因同秒多事件得到 0 秒周期，或者制造错误的超时阈值。
+        if (!isOneBotHeartbeat(msg)) return
+
         const connectionStore = useConnectionStore()
-        if (firstHeartbeatTime == -1) {
-            firstHeartbeatTime = 0
-            connectionStore.heartbeatTime = 0
+        if (connectionStore.lastHeartbeatTime < 0) {
+            lastHeartbeatReceivedAt = -1
+            heartbeatIntervalSeconds = -1
+        }
+        const now = Date.now()
+        // 优先使用 OneBot 心跳自带的 interval；缺失时再按本地单调时间测量。
+        const nextInterval = getHeartbeatIntervalSeconds(
+            msg.interval,
+            lastHeartbeatReceivedAt,
+            now,
+        )
+        if (nextInterval !== undefined) heartbeatIntervalSeconds = nextInterval
+
+        const eventTime = Number(msg.time)
+        connectionStore.oldHeartbeatTime = connectionStore.lastHeartbeatTime
+        connectionStore.lastHeartbeatTime =
+            Number.isFinite(eventTime) ? eventTime : Math.floor(now / 1000)
+        connectionStore.heartbeatTime = Math.max(heartbeatIntervalSeconds, 0)
+        lastHeartbeatReceivedAt = now
+
+        if (heartbeatIntervalSeconds > 0) {
+            refreshMetaEventWatchdog(heartbeatIntervalSeconds)
+        } else {
             clearMetaEventWatchdog()
-            return
-        }
-        if (firstHeartbeatTime == 0) {
-            firstHeartbeatTime = msg.time
-            connectionStore.lastHeartbeatTime = msg.time
-            clearMetaEventWatchdog()
-            return
-        }
-        if (firstHeartbeatTime != -1 && heartbeatTime == -1) {
-            // 计算心跳时间
-            heartbeatTime = msg.time - firstHeartbeatTime
-        }
-        // 记录心跳状态
-        if (heartbeatTime != -1) {
-            connectionStore.heartbeatTime = heartbeatTime
-            connectionStore.oldHeartbeatTime = connectionStore.lastHeartbeatTime
-            connectionStore.lastHeartbeatTime = msg.time
-            refreshMetaEventWatchdog(heartbeatTime)
         }
     },
 
@@ -2457,8 +2469,8 @@ function formatMessageData(data: any, isGroup: boolean) {
 
 // 重置 Runtime，但是保留应用设置之类已经加载好的应用内容
 export function resetRimtime(resetAll = false) {
-    firstHeartbeatTime = -1
-    heartbeatTime = -1
+    lastHeartbeatReceivedAt = -1
+    heartbeatIntervalSeconds = -1
     clearMetaEventWatchdog()
     recentHistoryRequested.clear()
     recentHistoryProbed.clear()

@@ -11210,6 +11210,7 @@ __metadata:
     rollup-plugin-visualizer: "npm:^5.12.0"
     semver: "npm:^7.7.1"
     spacingjs: "npm:^1.0.8"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:^5.5.2"
     uuid: "npm:^11.0.3"
     vconsole: "npm:^3.15.1"
@@ -11858,7 +11859,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ts-node@npm:^10.2.1":
+"ts-node@npm:^10.2.1, ts-node@npm:^10.9.2":
   version: 10.9.2
   resolution: "ts-node@npm:10.9.2"
   dependencies:
