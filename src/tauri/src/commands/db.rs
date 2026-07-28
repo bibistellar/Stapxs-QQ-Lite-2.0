@@ -239,9 +239,9 @@ fn try_open_encrypted(db_path: &std::path::Path) -> rusqlite::Result<Connection>
 
 // ── 命令实现 ─────────────────────────────────────────────────
 
-/// 批量保存消息（已存在的 message_id 自动忽略，不覆盖）
+/// 批量保存消息（已存在的 message_id 使用后端返回的完整内容更新）
 ///
-/// 返回实际插入的条数。
+/// 返回实际写入或更新的条数。
 #[tauri::command]
 pub fn db_save_messages(
     state: State<DbState>,
@@ -250,18 +250,28 @@ pub fn db_save_messages(
 ) -> Result<usize, String> {
     state.with_conn(|conn| {
         let now = chrono::Utc::now().timestamp_millis();
-        let mut inserted = 0usize;
+        let mut saved = 0usize;
 
         debug!("保存 {} 条 {} 的消息 ……", messages.len(), self_id);
 
         for msg in &messages {
             let n = conn
                 .execute(
-                    "INSERT OR IGNORE INTO messages
+                    "INSERT INTO messages
                         (self_id, message_id, chat_id, chat_type,
                          sender_id, sender_name, seq, time, message,
                          raw_message, revoked, created_at)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                     ON CONFLICT(self_id, message_id) DO UPDATE SET
+                         chat_id = excluded.chat_id,
+                         chat_type = excluded.chat_type,
+                         sender_id = excluded.sender_id,
+                         sender_name = excluded.sender_name,
+                         seq = COALESCE(excluded.seq, messages.seq),
+                         time = excluded.time,
+                         message = excluded.message,
+                         raw_message = excluded.raw_message,
+                         revoked = MAX(messages.revoked, excluded.revoked)",
                     params![
                         self_id,
                         msg.message_id,
@@ -278,12 +288,12 @@ pub fn db_save_messages(
                     ],
                 )
                 .map_err(|e| e.to_string())?;
-            inserted += n;
+            saved += n;
         }
 
-        debug!("成功保存 {} 条消息", inserted);
+        debug!("成功保存 {} 条消息", saved);
 
-        Ok(inserted)
+        Ok(saved)
     })
 }
 

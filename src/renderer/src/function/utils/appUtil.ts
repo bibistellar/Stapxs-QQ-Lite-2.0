@@ -46,6 +46,7 @@ import { sendMsgRaw } from './msgUtil'
 import { dbGetLatest } from './localHistoryUtil'
 import { parseMsg } from '../sender'
 import { Notify } from '../notify'
+import { mergeConversationMessages } from '../outgoingMessage'
 
 const popInfo = new PopInfo()
 const logger = new Logger()
@@ -110,6 +111,10 @@ export async function loadHistory(info: BaseChatInfoElem) {
     const chatStore = useChatStore()
     const settingsStore = useSettingsStore()
     chatStore.messageList = []
+    // 在 SQLite 查询期间保留快照；即使发送确认同时完成，也不会出现切换闪空。
+    const pendingMsgs = [...chatStore.pendingOutgoingMessages.values()]
+        .filter((item) => item.chatId === Number(info.id))
+        .map((item) => item.message)
     // 后台预取可能一次包含大量、复杂的消息段。不要在点击会话时同步灌入聊天组件，
     // 否则其中任一异常消息或集中预处理都可能阻断聊天视图挂载。
     // 当前会话仍走下方经过验证的本地最新消息 + OneBot 实时请求链路。
@@ -123,11 +128,9 @@ export async function loadHistory(info: BaseChatInfoElem) {
             info.id,
             20,
         )
-        if (localMsgs.length > 0) {
-            const existing = new Map(chatStore.messageList.map((item) => [String(item.message_id), item]))
-            localMsgs.forEach((item) => existing.set(String(item.message_id), item))
-            chatStore.messageList = [...existing.values()].sort((a, b) => Number(a.time) - Number(b.time))
-        }
+        chatStore.messageList = mergeConversationMessages(localMsgs, pendingMsgs)
+    } else if (pendingMsgs.length > 0) {
+        chatStore.messageList = mergeConversationMessages([], pendingMsgs)
     }
     // 离线模式只读 SQLite；OneBot 恢复后再由实时请求校准。
     if (login.status && !loadHistoryMessage(info.id, info.type)) {

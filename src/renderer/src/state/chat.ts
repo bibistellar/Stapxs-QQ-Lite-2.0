@@ -1,4 +1,5 @@
 import { ChatInfoElem, MergeStackData } from '@renderer/function/elements/information'
+import type { PendingOutgoingMessage } from '@renderer/function/outgoingMessage'
 import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 
@@ -22,6 +23,8 @@ export const useChatStore = defineStore('chat', () => {
     const messageList = ref<any[]>([])
     // 登录后预取的最近会话历史；打开会话时可先即时展示，再由网络请求校准。
     const recentHistoryCache = reactive(new Map<number, any[]>())
+    // 尚未完成本地落库的预发送消息；切换会话时仍可立即恢复。
+    const pendingOutgoingMessages = reactive(new Map<string, PendingOutgoingMessage>())
     const mergeMsgStack = ref<MergeStackData[]>([])
     const mergeMessageList = ref<any[] | undefined>(undefined)
     const mergeMessageImgList = ref<any[] | undefined>(undefined)
@@ -30,6 +33,7 @@ export const useChatStore = defineStore('chat', () => {
         chatInfo,
         messageList,
         recentHistoryCache,
+        pendingOutgoingMessages,
         mergeMsgStack,
         mergeMessageList,
         mergeMessageImgList,

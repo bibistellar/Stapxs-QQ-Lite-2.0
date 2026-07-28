@@ -18,6 +18,7 @@ import { useContactStore } from '@renderer/state/contact'
 import { useUIStore } from '@renderer/state/ui'
 import { useAuthStore } from '@renderer/state/auth'
 import { useChatStore } from '@renderer/state/chat'
+import { prepareOutgoingMessage } from '../outgoingMessage'
 
 const logger = new Logger()
 
@@ -480,12 +481,17 @@ export function sendMsgRaw(
             message: preShowMsg,
         } as { [key: string]: any }
         showMsg.raw_message = getMsgRawTxt(showMsg)
-
-        if (showMsg.message_type == 'group') {
-            showMsg.group_id = chatStore.chatInfo.show.id
-        } else {
-            showMsg.user_id = chatStore.chatInfo.show.id
-        }
+        const chatId = Number(chatStore.chatInfo.show.id)
+        prepareOutgoingMessage(
+            showMsg,
+            chatId,
+            chatStore.chatInfo.show.type,
+            authStore.loginInfo.uin,
+        )
+        chatStore.pendingOutgoingMessages.set(msgUUID, {
+            chatId,
+            message: showMsg,
+        })
         chatStore.messageList = chatStore.messageList.concat([showMsg])
     }
     // 检查消息体是否需要处理

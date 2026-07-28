@@ -156,7 +156,9 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
     if (chatId == null) return null
 
     const chatType: string =
-        msg.message_type ?? (msg.group_id != null ? 'group' : 'private')
+        msg.message_type === 'group' || msg.infoList.group_id != null
+            ? 'group'
+            : 'private'
     const senderId: number = msg.infoList.sender
     if (senderId == null) return null
 
@@ -183,7 +185,7 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
 // ── 读写接口 ──────────────────────────────────────────────────────
 
 /**
- * 批量将消息保存到本地 SQLite（已有的 message_id 自动忽略，不覆盖）。
+ * 批量将消息保存到本地 SQLite（已有的 message_id 使用较完整的新数据更新）。
  *
  * @param selfId  当前登录账号 uin
  * @param msgs    已完成预处理的消息对象数组（来自 chatStore.messageList 或 newMsg）

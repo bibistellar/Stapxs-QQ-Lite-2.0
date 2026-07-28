@@ -76,6 +76,7 @@ import {
     getHeartbeatTimeoutMs,
     isOneBotHeartbeat,
 } from './connectionHealth'
+import { confirmOutgoingMessage } from './outgoingMessage'
 
 const popInfo = new PopInfo()
 // eslint-disable-next-line
@@ -102,6 +103,57 @@ const RECENT_HISTORY_REQUEST_GAP = 250
 const recentHistoryRequested = new Set<number>()
 const recentHistoryProbed = new Set<number>()
 let databaseSessionsRestoredFor = ''
+
+function findOutgoingMessage(chatId: number, messageId?: string | number) {
+    const chatStore = useChatStore()
+    const candidates: any[] = []
+    const seen = new Set<any>()
+    const addCandidate = (message: any) => {
+        if (!message || seen.has(message)) return
+        seen.add(message)
+        candidates.push(message)
+    }
+
+    for (const pending of chatStore.pendingOutgoingMessages.values()) {
+        if (pending.chatId === chatId) addCandidate(pending.message)
+    }
+    if (Number(chatStore.chatInfo.show.id) === chatId) {
+        chatStore.messageList.forEach(addCandidate)
+    }
+
+    if (messageId !== undefined && messageId !== null) {
+        const expected = String(messageId)
+        const exact = candidates.find((item) =>
+            String(item?.message_id ?? '') === expected ||
+            String(item?.fake_message_id ?? '') === expected)
+        if (exact) return exact
+    }
+
+    return candidates.reverse().find((item) => item?.fake_msg === true)
+}
+
+function applyFullOutgoingMessage(target: any, confirmed: any) {
+    const fakeMessageId = target.fake_message_id
+    Object.assign(target, confirmed)
+    target.fake_message_id = fakeMessageId
+    target.fake_msg = false
+    target.revoke = false
+    return target
+}
+
+function persistOutgoingMessage(message: any) {
+    const authStore = useAuthStore()
+    const chatStore = useChatStore()
+    const pendingKey = String(message?.fake_message_id ?? '')
+    void saveMessagesWithSideEffects(authStore.loginInfo.uin, [message])
+        .finally(() => {
+            if (!pendingKey) return
+            const pending = chatStore.pendingOutgoingMessages.get(pendingKey)
+            if (pending?.message === message) {
+                chatStore.pendingOutgoingMessages.delete(pendingKey)
+            }
+        })
+}
 
 function normalizeSeconds(value: unknown) {
     const time = Number(value)
@@ -1031,9 +1083,8 @@ const msgFunctions = {
     ) => {
         const authStore = useAuthStore()
         const chatStore = useChatStore()
-        if (msg.message_id == undefined) {
-            msg.message_id = msg.data.message_id
-        }
+        const confirmedMessageId = msg.message_id ?? msg.data?.message_id
+        if (confirmedMessageId !== undefined) msg.message_id = confirmedMessageId
         if (echoList[1] == 'forward') {
             // PS：这儿写是写了转发成功，事实上不确定消息有没有真的发送出去（x
             popInfo.add(
@@ -1041,23 +1092,28 @@ const msgFunctions = {
                 app.config.globalProperties.$t('消息已转发'),
             )
         } else if (echoList[1] == 'uuid') {
-            const messageId = echoList[2]
-            // 去 messagelist 里找到这条消息
-            chatStore.messageList.forEach((item) => {
-                if (item.message_id == messageId) {
-                    item.message_id = msg.message_id
-                    item.fake_msg = false
-                    return
-                }
-            })
+            const temporaryMessageId = echoList[2]
+            const pending = chatStore.pendingOutgoingMessages
+                .get(temporaryMessageId)?.message
+            const current = chatStore.messageList.find((item) =>
+                String(item.fake_message_id ?? item.message_id) === temporaryMessageId)
+            const outgoing = pending ?? current
+            if (confirmedMessageId !== undefined) {
+                const targets = new Set([pending, current].filter(Boolean))
+                targets.forEach((item) =>
+                    confirmOutgoingMessage(item, confirmedMessageId))
+                if (outgoing) persistOutgoingMessage(outgoing)
+            }
             // 请求消息内容
             // PS：其实有消息通知的情况下不需要再去主动获取了
             // 但是为了兼容没有开启自身消息通知的情况，还是保留了这个功能
-            Connector.send(
-                authStore.jsonMap.get_message.name ?? 'get_msg',
-                { message_id: msg.message_id },
-                'getSendMsg_' + msg.message_id,
-            )
+            if (confirmedMessageId !== undefined) {
+                Connector.send(
+                    authStore.jsonMap.get_message.name ?? 'get_msg',
+                    { message_id: confirmedMessageId },
+                    'getSendMsg_' + confirmedMessageId,
+                )
+            }
         }
     },
     sendFileBack: (
@@ -1316,7 +1372,6 @@ const msgFunctions = {
         echoList: string[],
     ) => {
         const authStore = useAuthStore()
-        const chatStore = useChatStore()
         const msgInfo = getMsgData('message_info', msg.data, msgPath.message_info)
         if (msgInfo) {
             const info = msgInfo[0]
@@ -1330,34 +1385,25 @@ const msgFunctions = {
                     )
                 }, 5000)
             } else {
-                // 列表内最近的一条 fake_msg（倒序查找）
-                let fakeMsg = null as any
-                for (let i = chatStore.messageList.length - 1; i > 0; i--) {
-                    const msg = chatStore.messageList[i]
-                    if (msg.fake_msg != undefined && info.sender == authStore.loginInfo.uin) {
-                        fakeMsg = msg
-                        break
+                const chatId = Number(info.group_id ?? info.private_id)
+                const outgoing = findOutgoingMessage(chatId, info.message_id)
+                const trueMsg = getMsgData(
+                    'message_list',
+                    buildMsgList([msg.data]),
+                    msgPath.message_list,
+                )
+                void getMessageList(trueMsg).then((confirmed) => {
+                    if (confirmed?.length !== 1) return
+                    if (outgoing) {
+                        applyFullOutgoingMessage(outgoing, confirmed[0])
+                        persistOutgoingMessage(outgoing)
+                    } else {
+                        void saveMessagesWithSideEffects(
+                            authStore.loginInfo.uin,
+                            confirmed,
+                        )
                     }
-                }
-                // 预发送消息刷新
-                if (fakeMsg != null) {
-                    // 将这条消息直接替换掉
-                    const trueMsg = getMsgData(
-                        'message_list',
-                        buildMsgList([msg.data]),
-                        msgPath.message_list,
-                    )
-                    getMessageList(trueMsg).then((trueMsg) => {
-                        if (trueMsg?.length == 1) {
-                            // 使用消息对象引用直接更新，避免索引问题
-                            fakeMsg.message = trueMsg[0].message
-                            fakeMsg.raw_message = trueMsg[0].raw_message
-                            fakeMsg.time = trueMsg[0].time
-                            fakeMsg.fake_msg = undefined
-                            fakeMsg.revoke = false
-                        }
-                    })
-                }
+                })
             }
         }
     },
@@ -2217,35 +2263,22 @@ function newMsg(_: string, data: any) {
         const isImportant = senderInfo?.class_id == 9999
 
         // 预发送消息填充 ============================================
-        // 列表内最近的一条 fake_msg（倒序查找）
-        let fakeMsg = null as any
-        for (let i = chatStore.messageList.length - 1; i > 0; i--) {
-            const msg = chatStore.messageList[i]
-            if (msg.fake_msg != undefined && sender == loginId) {
-                fakeMsg = msg
-                break
-            }
-        }
+        // 同时从当前会话和跨会话 pending 缓存查找，避免切走后丢失确认回调。
+        const fakeMsg = sender == loginId
+            ? findOutgoingMessage(Number(id), data.message_id)
+            : undefined
         // 预发送消息刷新
-        if (fakeMsg != null) {
-            // 将这条消息直接替换掉
+        if (fakeMsg) {
             const trueMsg = getMsgData(
                 'message_list',
                 buildMsgList([data]),
                 msgPath.message_list,
             )
-            getMessageList(trueMsg).then((trueMsg) => {
-                if (trueMsg?.length == 1) {
-                    // 使用消息对象引用直接更新，避免索引问题
-                    fakeMsg.message = trueMsg[0].message
-                    fakeMsg.raw_message = trueMsg[0].raw_message
-                    fakeMsg.time = trueMsg[0].time
-                    fakeMsg.fake_msg = undefined
-                    fakeMsg.revoke = false
-                }
+            void getMessageList(trueMsg).then((confirmed) => {
+                if (confirmed?.length !== 1) return
+                applyFullOutgoingMessage(fakeMsg, confirmed[0])
+                persistOutgoingMessage(fakeMsg)
             })
-            // 移除最顶端的一条消息以被动刷新整个列表
-            chatStore.messageList.shift()
             return
         }
 
@@ -2504,6 +2537,7 @@ export function resetRimtime(resetAll = false) {
         })
         chatStore.messageList = []
         chatStore.recentHistoryCache.clear()
+        chatStore.pendingOutgoingMessages.clear()
         // Reset connection store
         const connectionStore = useConnectionStore()
         connectionStore.heartbeatTime = -1
