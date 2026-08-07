@@ -40,8 +40,8 @@ import {
     DirectiveBinding,
     Ref,
 } from 'vue'
-import { sendMsgRaw } from './msgUtil'
-import { dbGetLatest } from './localHistoryUtil'
+import { markSendingOutgoingUncertain, sendMsgRaw } from './msgUtil'
+import { dbGetLatest, dbGetOutgoing } from './localHistoryUtil'
 import { parseMsg } from '../sender'
 import { Notify } from '../notify'
 import { mergeConversationMessages } from '../outgoingMessage'
@@ -100,10 +100,14 @@ export async function loadHistory(info: BaseChatInfoElem) {
     const chatStore = useChatStore()
     const settingsStore = useSettingsStore()
     chatStore.messageList = []
-    // 在 SQLite 查询期间保留快照；即使发送确认同时完成，也不会出现切换闪空。
-    const pendingMsgs = [...chatStore.pendingOutgoingMessages.values()]
-        .filter((item) => item.chatId === Number(info.id))
-        .map((item) => item.message)
+    // 发件箱本身也在 SQLite 中；切换会话或重启后都从持久化状态恢复。
+    const pendingMsgs = await dbGetOutgoing(authStore.loginInfo.uin, Number(info.id))
+    pendingMsgs.forEach((message) => {
+        chatStore.pendingOutgoingMessages.set(String(message.client_id), {
+            chatId: Number(info.id),
+            message,
+        })
+    })
     // 后台预取可能一次包含大量、复杂的消息段。不要在点击会话时同步灌入聊天组件，
     // 否则其中任一异常消息或集中预处理都可能阻断聊天视图挂载。
     // 当前会话仍走下方经过验证的本地最新消息 + OneBot 实时请求链路。
@@ -439,6 +443,7 @@ export function createIpc() {
     })
     backend.addListener(undefined, 'onebot:onclose', (event, data) => {
         const info = data ?? event.payload
+        void markSendingOutgoingUncertain('连接中断，发送结果未知')
         Connector.onclose(info.code, info.reason || info.message, info.address, info.token)
     })
 }

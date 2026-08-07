@@ -26,6 +26,10 @@ import {
     updateBaseOnMsgList,
     updateLastestHistory,
     sendMsgAppendInfo,
+    finishOutgoingAttempt,
+    flushPendingOutgoingMessages,
+    markOutgoingFailed,
+    markOutgoingUncertain,
 } from '@renderer/function/utils/msgUtil'
 import {
     delay,
@@ -56,6 +60,9 @@ import { Notify } from './notify'
 import { backend } from '@renderer/runtime/backend'
 import {
     dbGetRecentSessions,
+    dbGetOutgoing,
+    dbDeleteOutgoing,
+    dbUpdateOutgoingState,
     dbRevokeMessage,
     saveMessagesWithSideEffects,
 } from './utils/localHistoryUtil'
@@ -93,7 +100,11 @@ const RECENT_HISTORY_REQUEST_GAP = 250
 const recentHistoryRequested = new Set<number>()
 let databaseSessionsRestoredFor = ''
 
-function findOutgoingMessage(chatId: number, messageId?: string | number) {
+function findOutgoingMessage(
+    chatId: number,
+    messageId?: string | number,
+    confirmed?: any,
+) {
     const chatStore = useChatStore()
     const candidates: any[] = []
     const seen = new Set<any>()
@@ -118,7 +129,27 @@ function findOutgoingMessage(chatId: number, messageId?: string | number) {
         if (exact) return exact
     }
 
-    return candidates.reverse().find((item) => item?.fake_msg === true)
+    const reversed = candidates.reverse()
+    if (confirmed) {
+        const raw = getMsgRawTxt(confirmed)
+        const time = Number(confirmed.time)
+        const contentMatch = reversed
+            .filter((item) => {
+                const itemTime = Number(item.time)
+                return item.fake_msg === true &&
+                    getMsgRawTxt(item) === raw &&
+                    Number.isFinite(time) &&
+                    Number.isFinite(itemTime) &&
+                    Math.abs(time - itemTime) <= 300
+            })
+            .sort((left, right) =>
+                Math.abs(Number(left.time) - time) -
+                Math.abs(Number(right.time) - time))[0]
+        if (contentMatch) return contentMatch
+    }
+    return reversed.find((item) => item?.outgoing_state === 'sending') ??
+        reversed.find((item) => item?.outgoing_state === 'uncertain') ??
+        reversed.find((item) => item?.fake_msg === true)
 }
 
 function applyFullOutgoingMessage(target: any, confirmed: any) {
@@ -127,21 +158,53 @@ function applyFullOutgoingMessage(target: any, confirmed: any) {
     target.fake_message_id = fakeMessageId
     target.fake_msg = false
     target.revoke = false
+    target.outgoing_state = undefined
+    target.outgoing_error = undefined
+    if (target.infoList) target.infoList.message_id = target.message_id
     return target
 }
 
-function persistOutgoingMessage(message: any) {
+async function reconcileOutgoingMessages(messages: any[]) {
+    const authStore = useAuthStore()
+    const tasks: Promise<void>[] = []
+    messages.forEach((message) => {
+        const sender = Number(message?.sender?.user_id)
+        if (sender !== Number(authStore.loginInfo.uin)) return
+        const chatId = Number(message?.group_id ?? message?.target_id ?? message?.user_id)
+        if (!Number.isFinite(chatId)) return
+        const outgoing = findOutgoingMessage(chatId, message.message_id, message)
+        if (!outgoing) return
+        applyFullOutgoingMessage(outgoing, message)
+        tasks.push(persistOutgoingMessage(outgoing))
+    })
+    await Promise.all(tasks)
+}
+
+async function persistOutgoingMessage(message: any) {
     const authStore = useAuthStore()
     const chatStore = useChatStore()
-    const pendingKey = String(message?.fake_message_id ?? '')
-    void saveMessagesWithSideEffects(authStore.loginInfo.uin, [message])
-        .finally(() => {
-            if (!pendingKey) return
-            const pending = chatStore.pendingOutgoingMessages.get(pendingKey)
-            if (pending?.message === message) {
-                chatStore.pendingOutgoingMessages.delete(pendingKey)
-            }
-        })
+    const clientId = String(message?.client_id ?? message?.fake_message_id ?? '')
+    if (clientId && message.message_id != null) {
+        await dbUpdateOutgoingState(
+            authStore.loginInfo.uin,
+            clientId,
+            'sending',
+            { serverMessageId: message.message_id },
+        )
+    }
+    const saved = await saveMessagesWithSideEffects(authStore.loginInfo.uin, [message])
+    if (!saved) {
+        if (clientId) {
+            await markOutgoingUncertain(clientId, '消息已确认，但写入本地历史失败')
+        }
+        return
+    }
+    if (clientId) await dbDeleteOutgoing(authStore.loginInfo.uin, clientId)
+    const pending = chatStore.pendingOutgoingMessages.get(clientId)
+    if (pending?.message === message || pending) {
+        chatStore.pendingOutgoingMessages.delete(clientId)
+    }
+    if (clientId) finishOutgoingAttempt(clientId)
 }
 
 function normalizeSeconds(value: unknown) {
@@ -200,9 +263,17 @@ export async function restoreDatabaseSessions(
     ) return 0
 
     databaseSessionsRestoredFor = uin
-    const latestMessages = await dbGetRecentSessions(uin, 200)
+    const [latestMessages, outgoingMessages] = await Promise.all([
+        dbGetRecentSessions(uin, 200),
+        dbGetOutgoing(uin),
+    ])
     let restored = 0
-    latestMessages.forEach((latest) => {
+    const localMessages = [...latestMessages, ...outgoingMessages]
+        .sort((a, b) => Number(a.time) - Number(b.time))
+    localMessages.forEach((latest) => {
+        if (latest.client_id && latest.server_message_id) {
+            confirmOutgoingMessage(latest, latest.server_message_id)
+        }
         const id = Number(latest?.infoList?.group_id ?? latest?.infoList?.target_id)
         if (!Number.isFinite(id) || id <= 0) return
         let contact = contactStore.userList.find((item) =>
@@ -226,6 +297,13 @@ export async function restoreDatabaseSessions(
         }
         Object.assign(contact, formatMessageData(latest, latest.message_type === 'group'))
         contactStore.baseOnMsgList.set(id, contact)
+        if (latest.client_id) {
+            useChatStore().pendingOutgoingMessages.set(String(latest.client_id), {
+                chatId: id,
+                message: latest,
+            })
+            if (latest.server_message_id) void persistOutgoingMessage(latest)
+        }
         restored++
     })
     if (restored > 0) {
@@ -731,6 +809,7 @@ const msgFunctions = {
             authStore.loginInfo = data
             login.status = true
             login.localReady = true
+            void flushPendingOutgoingMessages()
 
             // 保存用户信息到连接历史
             saveConnectionToHistory(login.address, login.token, data.uin, data.nickname)
@@ -904,9 +983,22 @@ const msgFunctions = {
         const chatStore = useChatStore()
         const authStore = useAuthStore()
         const cutoff = Math.floor(Date.now() / 1000) - RECENT_HISTORY_SECONDS
-        void normalizeMessagesFromPayload(msg).then((list) => {
+        void normalizeMessagesFromPayload(msg).then(async (list) => {
             if (!list) return
             const recent = list.filter((item) => normalizeSeconds(item.time) >= cutoff)
+            await reconcileOutgoingMessages(recent)
+            const unresolved = await dbGetOutgoing(
+                authStore.loginInfo.uin,
+                id,
+                ['uncertain'],
+            )
+            for (const outgoing of unresolved) {
+                await markOutgoingFailed(
+                    String(outgoing.client_id),
+                    '未在 SnowLuma 最近历史中确认发送结果，点击图标可重试',
+                    false,
+                )
+            }
             if (recent.length === 0) return
             const merged = mergeMessagesByIdAndTime(
                 chatStore.recentHistoryCache.get(id) ?? [],
@@ -1001,6 +1093,17 @@ const msgFunctions = {
             )
         } else if (echoList[1] == 'uuid') {
             const temporaryMessageId = echoList[2]
+            const failed = (msg.status != null && msg.status !== 'ok') ||
+                (msg.retcode != null && Number(msg.retcode) !== 0)
+            if (failed) {
+                const error = String(msg.message ?? msg.wording ?? `发送失败 (${msg.retcode ?? 'unknown'})`)
+                const pendingMessage = chatStore.pendingOutgoingMessages
+                    .get(temporaryMessageId)?.message
+                if (pendingMessage?.fake_msg === true) {
+                    void markOutgoingFailed(temporaryMessageId, error)
+                }
+                return
+            }
             const pending = chatStore.pendingOutgoingMessages
                 .get(temporaryMessageId)?.message
             const current = chatStore.messageList.find((item) =>
@@ -1010,7 +1113,7 @@ const msgFunctions = {
                 const targets = new Set([pending, current].filter(Boolean))
                 targets.forEach((item) =>
                     confirmOutgoingMessage(item, confirmedMessageId))
-                if (outgoing) persistOutgoingMessage(outgoing)
+                if (outgoing) void persistOutgoingMessage(outgoing)
             }
             // 请求消息内容
             // PS：其实有消息通知的情况下不需要再去主动获取了
@@ -1292,7 +1395,7 @@ const msgFunctions = {
                     if (confirmed?.length !== 1) return
                     if (outgoing) {
                         applyFullOutgoingMessage(outgoing, confirmed[0])
-                        persistOutgoingMessage(outgoing)
+                        void persistOutgoingMessage(outgoing)
                     } else {
                         void saveMessagesWithSideEffects(
                             authStore.loginInfo.uin,
@@ -1562,6 +1665,7 @@ async function saveMsg(msg: any, append = undefined as undefined | string) {
         }
 
         // 保存到本地历史
+        await reconcileOutgoingMessages(list)
         saveMessagesWithSideEffects(authStore.loginInfo.uin, list)
         // 追加处理
         if (append != undefined) {
@@ -1965,7 +2069,7 @@ function newMsg(_: string, data: any) {
 
         // 预发送消息填充 ============================================
         // 同时从当前会话和跨会话 pending 缓存查找，避免切走后丢失确认回调。
-        const fakeMsg = sender == loginId? findOutgoingMessage(Number(id), data.message_id): undefined
+        const fakeMsg = sender == loginId? findOutgoingMessage(Number(id), data.message_id, data): undefined
         // 预发送消息刷新
         if (fakeMsg) {
             const trueMsg = getMsgData(
@@ -1976,7 +2080,7 @@ function newMsg(_: string, data: any) {
             void getMessageList(trueMsg).then((confirmed) => {
                 if (confirmed?.length !== 1) return
                 applyFullOutgoingMessage(fakeMsg, confirmed[0])
-                persistOutgoingMessage(fakeMsg)
+                void persistOutgoingMessage(fakeMsg)
             })
             return
         }

@@ -10,6 +10,7 @@ import { getMsgRawTxt } from './msgUtil'
 import { Logger } from '../base'
 import { useSettingsStore } from '@renderer/state/settings'
 import { useAuthStore } from '@renderer/state/auth'
+import type { OutgoingMessageState } from '../outgoingMessage'
 
 const logger = new Logger()
 
@@ -36,6 +37,24 @@ export interface LocalMsgRecord {
     raw_message: string | null
     /** 是否已撤回 */
     revoked: boolean
+}
+
+export interface LocalOutgoingRecord {
+    client_id: string
+    chat_id: number
+    chat_type: string
+    source_group_id: number | null
+    sender_id: number
+    sender_name: string | null
+    time: number
+    message: string
+    payload: string
+    raw_message: string | null
+    state: OutgoingMessageState
+    server_message_id: string | null
+    error: string | null
+    retry_count: number
+    echo: string
 }
 
 async function callDbRecordList(
@@ -181,7 +200,7 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
  * @param selfId  当前登录账号 uin
  * @param msgs    已完成预处理的消息对象数组（来自 chatStore.messageList 或 newMsg）
  */
-export async function dbSaveMessages(selfId: string | number, msgs: any[]): Promise<void> {
+export async function dbSaveMessages(selfId: string | number, msgs: any[]): Promise<boolean> {
     const persistableMsgs = ensureChatIdOnMsgs(selfId, msgs)
     const records: LocalMsgRecord[] = persistableMsgs
         .map(msgToRecord)
@@ -189,25 +208,144 @@ export async function dbSaveMessages(selfId: string | number, msgs: any[]): Prom
 
     if (records.length === 0) {
         logger.error(null, '[LocalHistory] dbSaveMessages: 没有有效消息可保存')
-        return
+        return false
     }
 
     try {
-        await backend.call(undefined, 'db:saveMessages', true, {
+        const saved = await backend.call(undefined, 'db:saveMessages', true, {
             selfId: String(selfId),
             messages: records,
         })
+        return Number(saved) > 0
     } catch (e) {
         logger.error(e as unknown as Error, '[LocalHistory] dbSaveMessages 失败')
+        return false
     }
 }
 
-export async function saveMessagesWithSideEffects(selfId: string | number, msgs: any[]): Promise<void> {
+export async function saveMessagesWithSideEffects(
+    selfId: string | number,
+    msgs: any[],
+): Promise<boolean> {
     const settingsStore = useSettingsStore()
     const persistableMsgs = ensureChatIdOnMsgs(selfId, msgs)
-    await dbSaveMessages(selfId, persistableMsgs)
-    if (settingsStore.sysConfig.disable_local_history_image_cache === true) return
+    const saved = await dbSaveMessages(selfId, persistableMsgs)
+    if (!saved) return false
+    if (settingsStore.sysConfig.disable_local_history_image_cache === true) return true
     cacheImagesFromMsgs(selfId, persistableMsgs).catch(() => {})
+    return true
+}
+
+function outgoingToRecord(message: any, echo = 'sendMsgBack'): LocalOutgoingRecord | null {
+    const clientId = String(message.client_id ?? message.fake_message_id ?? '')
+    const chatId = Number(message.infoList?.group_id ?? message.infoList?.target_id)
+    const senderId = Number(message.infoList?.sender ?? message.sender?.user_id)
+    if (!clientId || !Number.isFinite(chatId) || !Number.isFinite(senderId)) return null
+
+    return {
+        client_id: clientId,
+        chat_id: chatId,
+        chat_type: message.message_type === 'group' ? 'group' : 'private',
+        source_group_id: message.source_group_id != null ? Number(message.source_group_id) : null,
+        sender_id: senderId,
+        sender_name: message.sender?.card || message.sender?.nickname || null,
+        time: Number(message.time),
+        message: serializeMsgSegments(message.message),
+        payload: JSON.stringify(message.outgoing_payload ?? message.message),
+        raw_message: computeRawMessage(message),
+        state: message.outgoing_state ?? 'pending',
+        server_message_id: message.server_message_id != null? String(message.server_message_id): null,
+        error: message.outgoing_error ?? null,
+        retry_count: Number(message.retry_count ?? 0),
+        echo,
+    }
+}
+
+/** 先于网络请求持久化发送意图。 */
+export async function dbSaveOutgoing(
+    selfId: string | number,
+    message: any,
+    echo = 'sendMsgBack',
+): Promise<boolean> {
+    const outgoing = outgoingToRecord(message, echo)
+    if (!outgoing) return false
+    return Boolean(await callDb(
+        selfId,
+        'db:saveOutgoing',
+        { outgoing },
+        false,
+        '[LocalHistory] dbSaveOutgoing 失败',
+    ))
+}
+
+export async function dbUpdateOutgoingState(
+    selfId: string | number,
+    clientId: string,
+    sendState: OutgoingMessageState,
+    options: {
+        serverMessageId?: string | number
+        error?: string
+        incrementRetry?: boolean
+    } = {},
+): Promise<boolean> {
+    return Boolean(await callDb(
+        selfId,
+        'db:updateOutgoingState',
+        {
+            clientId,
+            sendState,
+            serverMessageId: options.serverMessageId != null? String(options.serverMessageId): undefined,
+            error: options.error,
+            incrementRetry: options.incrementRetry,
+        },
+        false,
+        '[LocalHistory] dbUpdateOutgoingState 失败',
+    ))
+}
+
+export async function dbDeleteOutgoing(
+    selfId: string | number,
+    clientId: string,
+): Promise<boolean> {
+    return Boolean(await callDb(
+        selfId,
+        'db:deleteOutgoing',
+        { clientId },
+        false,
+        '[LocalHistory] dbDeleteOutgoing 失败',
+    ))
+}
+
+export async function dbMarkSendingUncertain(
+    selfId: string | number,
+    error: string,
+): Promise<number> {
+    return Number(await callDb(
+        selfId,
+        'db:markSendingUncertain',
+        { error },
+        0,
+        '[LocalHistory] dbMarkSendingUncertain 失败',
+    ))
+}
+
+export async function dbGetOutgoing(
+    selfId: string | number,
+    chatId?: number,
+    states?: OutgoingMessageState[],
+): Promise<any[]> {
+    try {
+        const records: LocalOutgoingRecord[] = await backend.call(
+            undefined,
+            'db:getOutgoing',
+            true,
+            { selfId: String(selfId), chatId, states },
+        )
+        return (records ?? []).map(deserializeOutgoingRecord)
+    } catch (e) {
+        logger.error(e as unknown as Error, '[LocalHistory] dbGetOutgoing 失败')
+        return []
+    }
 }
 
 /**
@@ -493,6 +631,49 @@ function deserializeRecord(record: LocalMsgRecord): any {
         // 消息序列号（并非所有 Bot 都提供，可为 null）
         ...(record.seq != null ? { message_seq: record.seq, seq_id: record.seq } : {}),
         // 标记来源为本地缓存，业务层可按需用此字段区分
+        _from_local_db: true,
+    }
+}
+
+function deserializeOutgoingRecord(record: LocalOutgoingRecord): any {
+    const isGroup = record.chat_type === 'group'
+    return {
+        post_type: 'message_sent',
+        message_id: record.client_id,
+        fake_message_id: record.client_id,
+        client_id: record.client_id,
+        fake_msg: true,
+        revoke: true,
+        outgoing_state: record.state,
+        outgoing_error: record.error ?? undefined,
+        server_message_id: record.server_message_id ?? undefined,
+        retry_count: record.retry_count,
+        echo: record.echo,
+        source_group_id: record.source_group_id ?? undefined,
+        message_type: isGroup ? 'group' : 'private',
+        ...(isGroup ? { group_id: record.chat_id } : { user_id: record.chat_id }),
+        sender: {
+            user_id: record.sender_id,
+            card: isGroup ? record.sender_name ?? '' : '',
+            nickname: record.sender_name ?? '',
+        },
+        time: record.time,
+        message: deserializeMsgSegments(record.message),
+        outgoing_payload: (() => {
+            try {
+                return JSON.parse(record.payload)
+            } catch {
+                return deserializeMsgSegments(record.message)
+            }
+        })(),
+        infoList: {
+            message_id: record.client_id,
+            private_id: isGroup ? undefined : record.chat_id,
+            group_id: isGroup ? record.chat_id : undefined,
+            target_id: isGroup ? undefined : record.chat_id,
+            sender: record.sender_id,
+        },
+        raw_message: record.raw_message ?? '',
         _from_local_db: true,
     }
 }

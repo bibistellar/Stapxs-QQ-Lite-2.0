@@ -1,3 +1,5 @@
+export type OutgoingMessageState = 'pending' | 'sending' | 'failed' | 'uncertain'
+
 export interface PendingOutgoingMessage {
     chatId: number
     message: any
@@ -29,6 +31,8 @@ export function prepareOutgoingMessage(
         private_id: isGroup ? undefined : chatId,
         target_id: isGroup ? undefined : chatId,
     }
+    message.client_id ??= String(message.fake_message_id ?? message.message_id)
+    message.outgoing_state ??= 'pending'
     return message
 }
 
@@ -38,9 +42,22 @@ export function prepareOutgoingMessage(
 export function confirmOutgoingMessage(message: any, messageId: string | number) {
     message.message_id = messageId
     message.fake_msg = false
+    message.outgoing_state = undefined
+    message.outgoing_error = undefined
     if (message.infoList) {
         message.infoList.message_id = messageId
     }
+    return message
+}
+
+export function setOutgoingMessageState(
+    message: any,
+    state: OutgoingMessageState,
+    error?: string,
+) {
+    message.outgoing_state = state
+    message.outgoing_error = error
+    message.fake_msg = true
     return message
 }
 

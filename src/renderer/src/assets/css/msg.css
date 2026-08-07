@@ -67,6 +67,18 @@
     color: var(--color-font-2);
     width: 0.8rem;
 }
+.message > div.sending.pending > svg,
+.message > div.sending.failed > svg,
+.message > div.sending.uncertain > svg {
+    animation: none !important;
+}
+.message > div.sending.failed {
+    color: var(--color-red, #e74c3c);
+    cursor: pointer;
+}
+.message > div.sending.uncertain {
+    color: var(--color-yellow, #f39c12);
+}
 
 .message-body {
     color: var(--color-font);

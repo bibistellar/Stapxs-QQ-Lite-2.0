@@ -5,6 +5,7 @@ import {
     confirmOutgoingMessage,
     mergeConversationMessages,
     prepareOutgoingMessage,
+    setOutgoingMessageState,
 } from '../src/renderer/src/function/outgoingMessage.ts'
 
 test('prepares a group outgoing message for local persistence', () => {
@@ -19,6 +20,8 @@ test('prepares a group outgoing message for local persistence', () => {
     assert.equal(message.group_id, 123)
     assert.equal(message.infoList.group_id, 123)
     assert.equal(message.infoList.sender, 456)
+    assert.equal(message.client_id, 'temporary')
+    assert.equal(message.outgoing_state, 'pending')
 })
 
 test('normalizes a private outgoing message and confirms its real id', () => {
@@ -37,6 +40,23 @@ test('normalizes a private outgoing message and confirms its real id', () => {
     assert.equal(message.message_id, 789)
     assert.equal(message.infoList.message_id, 789)
     assert.equal(message.fake_msg, false)
+    assert.equal(message.outgoing_state, undefined)
+})
+
+test('keeps an outgoing failure as a retryable local message', () => {
+    const message = prepareOutgoingMessage(
+        { message_id: 'temporary', message: [], fake_msg: true },
+        123,
+        'private',
+        456,
+    )
+
+    setOutgoingMessageState(message, 'failed', 'network error')
+
+    assert.equal(message.message_id, 'temporary')
+    assert.equal(message.fake_msg, true)
+    assert.equal(message.outgoing_state, 'failed')
+    assert.equal(message.outgoing_error, 'network error')
 })
 
 test('merges pending messages without duplicating a confirmed database record', () => {
