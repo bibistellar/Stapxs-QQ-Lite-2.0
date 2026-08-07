@@ -11,6 +11,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.renderer.json",
     "test:connection": "cross-env TS_NODE_PROJECT=tsconfig.renderer.json TS_NODE_TRANSPILE_ONLY=true node --loader ts-node/esm --test tests/connection-url.test.ts tests/connection-health.test.ts",
     "test:outgoing": "cross-env TS_NODE_PROJECT=tsconfig.renderer.json TS_NODE_TRANSPILE_ONLY=true node --loader ts-node/esm --test tests/outgoing-message.test.ts",
+    "test:updater": "node --test tests/updater-manifest.test.mjs",
     "check": "yarn lint && yarn typecheck",
     "lint:tauri": "cargo check --manifest-path src/tauri/Cargo.toml",
     "update:version": "node ./scripts/update-version.cjs",
@@ -25,10 +26,10 @@
     "@tauri-apps/plugin-clipboard-manager": "^2.3.0",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-shell": "~2",
+    "@tauri-apps/plugin-updater": "2.9.0",
     "ai": "^6.0.145",
     "jsonpath": "^1.1.1",
     "pinia": "^3.0.3",
-    "semver": "^7.7.1",
     "vue-virtual-scroller": "^2.0.0-beta.8"
   },
   "devDependencies": {
@@ -42,7 +43,6 @@
     "@tauri-apps/cli": "^2.3.1",
     "@types/jsonpath": "^0.2.4",
     "@types/node": "^20.14.8",
-    "@types/semver": "^7.5.8",
     "@vitejs/plugin-vue": "^5.0.5",
     "@vue/eslint-config-typescript": "^13.0.0",
     "@vuemap/vue-amap": "^2.1.17",

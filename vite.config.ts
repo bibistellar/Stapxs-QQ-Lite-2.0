@@ -53,9 +53,6 @@ export function configFactory(outPath: string): UserConfigFnObject {
         }
 
         return {
-            define: {
-                __BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA ?? ''),
-            },
             root: './src/renderer',
             envDir: '../../',
             cacheDir: '../../.vite',

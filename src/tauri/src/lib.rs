@@ -7,7 +7,7 @@ use commands::db::DbState;
 use std::collections::HashMap;
 
 use commands::utils::http_proxy::ProxyServer;
-use log::{info, error, debug};
+use log::{info, error, debug, warn};
 use log4rs::{append::console::ConsoleAppender, config::{Appender, Logger, Root}, Config};
 
 #[cfg(target_os = "macos")]
@@ -40,8 +40,16 @@ pub fn run() {
     PROXY_PORT.set(proxy.port).unwrap();
 
     // 初始化 Tauri 应用程序 ============
+    let updater = if let Some(pubkey) = option_env!("TAURI_UPDATER_PUBLIC_KEY") {
+        tauri_plugin_updater::Builder::new().pubkey(pubkey).build()
+    } else {
+        warn!("构建时未提供 TAURI_UPDATER_PUBLIC_KEY，签名自动更新将不可用");
+        tauri_plugin_updater::Builder::new().build()
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(updater)
         .setup(|app| {
             let store =
                 StoreBuilder::new(app, ".settings.dat").build().map_err(|e| e.to_string())?;

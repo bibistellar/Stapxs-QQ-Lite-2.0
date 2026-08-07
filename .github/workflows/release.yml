@@ -1,9 +1,10 @@
-# 主分支构建发布
+# 正式版本构建发布
 name: build-app
 on:
     push:
-        branches:
-            - 2.0
+        tags:
+            - 'v*'
+    workflow_dispatch:
 
 jobs:
     # ========================= 准备项目 =========================
@@ -21,7 +22,13 @@ jobs:
             # 初始化一些流程需要的环境变量
             - name: Init Env
               id: step_init
-              run: echo VERSION=$(node -p "require('./package.json').version") >> $GITHUB_OUTPUT
+              run: |
+                  VERSION=$(node -p "require('./package.json').version")
+                  if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" != "v${VERSION}" ]; then
+                      echo "标签 ${{ github.ref_name }} 与 package.json 版本 v${VERSION} 不一致" >&2
+                      exit 1
+                  fi
+                  echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
     # ========================= 构建 Tauri 版本 =========================
 
@@ -31,6 +38,7 @@ jobs:
         uses: ./.github/workflows/build-tauri.yml
         with:
             version: ${{ needs.init.outputs.version }}
+        secrets: inherit
 
     # ========================= 发布构建结果 =========================
     release:
@@ -43,27 +51,31 @@ jobs:
             - init
             - build-tauri
         steps:
+            - name: Checkout
+              uses: actions/checkout@v4
             # 下载构建结果
             - name: Download Artifacts
               id: download-artifact
               uses: actions/download-artifact@v4
               with:
-                  path: ${{ needs.init.outputs.version }}-*
+                  path: release-assets
                   pattern: ${{ needs.init.outputs.version }}-*
                   merge-multiple: true
             - name: Artifacts List
-              run: ls -R
+              run: find release-assets -maxdepth 1 -type f -print
+            - name: 生成自动更新清单
+              run: node scripts/generate-updater-json.mjs release-assets "${{ github.repository }}" "${{ needs.init.outputs.version }}" "正式发布版本 v${{ needs.init.outputs.version }}"
             # 发布构建结果
             - name: Publish Release
               uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
               with:
-                  files: ./${{ needs.init.outputs.version }}-*/*
+                  files: release-assets/*
                   tag_name: v${{ needs.init.outputs.version }}
                   body: |
                       # Release 自动构建
                       `这是一个自动构建版本，由 GitHub Actions 自动构建并发布。`
                       ## 更新内容
-                      ${{ github.event.head_commit.message }}
+                      正式发布版本 v${{ needs.init.outputs.version }}
                       ## 下载说明
                       - Windows：`.exe`（NSIS 安装包）
                       - Linux：`.AppImage` / `.deb`（x86_64 与 aarch64）
@@ -76,9 +88,8 @@ jobs:
                       > xattr -dr com.apple.quarantine "/Applications/Stapxs QQ Lite.app"
                       > ```
                       ## 自动构建信息
-                      - 构建时间：${{ github.event.head_commit.timestamp }}
-                      - 构建提交：${{ github.event.head_commit.id }}
-                      - 构建分支：${{ github.event.head_commit.tree_id }}
+                      - 构建提交：${{ github.sha }}
+                      - 构建引用：${{ github.ref_name }}
                   draft: false
                   prerelease: false
                   # 上游用 PAT（可触发下游工作流）；fork 无此 secret 时回退到内置 GITHUB_TOKEN

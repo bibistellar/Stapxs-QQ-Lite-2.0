@@ -115,6 +115,7 @@ export const optDefault: { [key: string]: any } = {
     // 本地消息数据库始终启用，加载策略仍可单独配置。
     mixed_load_messages: true,
     disable_local_history_image_cache: false,
+    auto_check_update: true,
     // Dev
     msg_type: 2,
     log_level: 'err',

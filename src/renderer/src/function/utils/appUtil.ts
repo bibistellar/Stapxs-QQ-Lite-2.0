@@ -1,8 +1,7 @@
 import app from '@renderer/main'
 import option from '@renderer/function/option'
-import semver from 'semver'
-import appInfo from '../../../../../package.json'
 import Umami from '@stapxs/umami-logger-typescript'
+import type { DownloadEvent, Update } from '@tauri-apps/plugin-updater'
 
 import AboutPan from '@renderer/components/AboutPan.vue'
 import UpdatePan from '@renderer/components/UpdatePan.vue'
@@ -49,6 +48,14 @@ import { backend } from '@renderer/runtime/backend'
 
 const popInfo = new PopInfo()
 const logger = new Logger()
+const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000
+const UPDATE_RETRY_INTERVAL = 30 * 60 * 1000
+const UPDATE_TIMER_INTERVAL = 30 * 60 * 1000
+const UPDATE_NEXT_CHECK_KEY = 'updater_next_check_at'
+const RELEASE_PAGE = 'https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases/latest'
+let updateCheckInFlight: Promise<boolean> | undefined
+let updateCheckTimer: number | undefined
+let updaterInstallInProgress = false
 
 /**
  * 滚动到目标消息（不自动加载）
@@ -523,146 +530,161 @@ function setQuickLogin(address: string, port: number) {
         login.quickLogin.push({ address: address, port: port })
 }
 
-/**
-* 检查更新
-*/
-export async function checkUpdate(manual = false) {
+/** 启动时立即尝试检查，并为长期运行的客户端保留周期检查。 */
+export function startUpdateChecks() {
+    if (updateCheckTimer !== undefined) return
+    void checkUpdate()
+    updateCheckTimer = window.setInterval(() => {
+        void checkUpdate()
+    }, UPDATE_TIMER_INTERVAL)
+    window.addEventListener('online', () => void checkUpdate())
+    window.addEventListener('focus', () => void checkUpdate())
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void checkUpdate()
+    })
+}
+
+/** 使用 Tauri Updater 的签名端点检查更新。 */
+export async function checkUpdate(manual = false): Promise<boolean> {
+    const settingsStore = useSettingsStore()
+    if (!manual && settingsStore.sysConfig.auto_check_update === false) return false
+
+    const now = Date.now()
+    const nextCheckAt = Number(localStorage.getItem(UPDATE_NEXT_CHECK_KEY) ?? 0)
+    if (!manual && Number.isFinite(nextCheckAt) && now < nextCheckAt) return false
+    if (updateCheckInFlight) return updateCheckInFlight
+
+    updateCheckInFlight = performUpdateCheck(manual).finally(() => {
+        updateCheckInFlight = undefined
+    })
+    return updateCheckInFlight
+}
+
+async function performUpdateCheck(manual: boolean): Promise<boolean> {
     const { $t } = app.config.globalProperties
-    const repoName = import.meta.env.VITE_APP_REPO_NAME
-    const packageUrl = `https://api.github.com/repos/${repoName}/releases/latest`
-    const cacheVersion = localStorage.getItem('version')
     try {
-        const response = await fetch(packageUrl, {
-            headers: { Accept: 'application/vnd.github+json' },
-        })
-        if (!response.ok) throw new Error(`GitHub API ${response.status}`)
-        const data = await response.json()
-        const hasUpdate = showUpadteLog(data, cacheVersion)
-        if (manual && !hasUpdate) {
-            new PopInfo().add(PopType.INFO, $t('当前已是最新版本'), false)
+        const { check } = await import('@tauri-apps/plugin-updater')
+        const update = await check({ timeout: 15000 })
+        localStorage.setItem(
+            UPDATE_NEXT_CHECK_KEY,
+            String(Date.now() + UPDATE_CHECK_INTERVAL),
+        )
+        if (!update) {
+            if (manual) {
+                new PopInfo().add(PopType.INFO, $t('当前已是最新版本'), false)
+            }
+            return false
         }
-        localStorage.setItem('version', appInfo.version)
+        showTauriUpdate(update)
+        return true
     } catch (e) {
-        logger.error(e as Error, '检查更新失败')
-        if (manual) {
-            new PopInfo().add(PopType.ERR, $t('检查更新失败'), false)
-        }
+        localStorage.setItem(
+            UPDATE_NEXT_CHECK_KEY,
+            String(Date.now() + UPDATE_RETRY_INTERVAL),
+        )
+        logger.error(e as Error, 'Tauri Updater 检查更新失败')
+        if (manual) showUpdaterFailure($t('检查更新失败，请稍后重试'))
+        return false
     }
 }
 
-/**
-* 展示更新弹窗
-* @param data 更新数据
-*/
-function showUpadteLog(data: any, cacheVersion: string | null) {
-    const appVersion = appInfo.version // 当前版本
-    // 这儿有两种情况：
-    //    如果当前版本小于获取到的版本就是有更新
-    //    如果缓存版本小于获取到的版本但是当前版本等于获取到的版本就是更新完成首次启动
-    const latestVersion = String(data.tag_name ?? '').replace(/^v/, '')
-    const releaseCommit = String(data.body ?? '')
-        .match(/构建提交[：:]\s*([a-f0-9]{7,40})/i)?.[1] ?? ''
-    const newerVersion = Boolean(
-        semver.valid(appVersion) &&
-        semver.valid(latestVersion) &&
-        semver.lt(appVersion, latestVersion),
-    )
-    const sameVersion = Boolean(
-        semver.valid(appVersion) &&
-        semver.valid(latestVersion) &&
-        semver.eq(appVersion, latestVersion),
-    )
-    // release.yml 会复用同一版本号更新构建产物；使用构建 SHA 识别同版本的新构建。
-    const newerBuild = Boolean(
-        sameVersion &&
-        releaseCommit &&
-        __BUILD_COMMIT__ &&
-        !releaseCommit.startsWith(__BUILD_COMMIT__) &&
-        !__BUILD_COMMIT__.startsWith(releaseCommit),
-    )
-
-    if (newerVersion || newerBuild) {
-        // 有更新
-        showReleaseLog(data, false)
-        return true
-    }
-    if (
-        cacheVersion &&
-        semver.valid(cacheVersion) &&
-        semver.valid(latestVersion) &&
-        semver.eq(appVersion, latestVersion) &&
-        semver.lt(cacheVersion, latestVersion)
-    ) {
-        // 更新完成首次启动
-        showReleaseLog(data, true)
-        return true
-    }
-    return false
-}
-
-function getReleaseDownloadUrl(data: any) {
-    const assets = Array.isArray(data.assets) ? data.assets : []
-    const arch = (backend.arch ?? '').toLowerCase()
-    let pattern: RegExp | undefined
-    if (backend.platform === 'win32') {
-        pattern = /(x64|amd64)-setup\.exe$/i
-    } else if (backend.platform === 'darwin') {
-        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.dmg$/i
-        else pattern = /_x64\.dmg$/i
-    } else if (backend.platform === 'linux') {
-        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.AppImage$/i
-        else pattern = /_amd64\.AppImage$/i
-    }
-    const asset = pattern? assets.find((item: any) => pattern?.test(String(item.name ?? ''))): undefined
-    return asset?.browser_download_url ?? data.html_url
-}
-
-function showReleaseLog(data: any, isUpdated: boolean) {
+function showTauriUpdate(update: Update) {
     const uiStore = useUIStore()
     const { $t } = app.config.globalProperties
-    const msg = String(data.body ?? '')
     const info = {
-        version:
-            (isUpdated ? localStorage.getItem('version') + ' -> ' : '') +
-            data.tag_name.substring(1),
-        date: data.published_at,
-        user: {
-            name: data.author.login,
-            avatar: data.author.avatar_url,
-            url: data.author.html_url,
-        },
-        message: msg,
-        updated: isUpdated,
+        version: `${update.currentVersion} -> ${update.version}`,
+        date: update.date,
+        message: update.body ?? '',
+        updated: false,
     }
-    const buttonGoUpdate = [
-        {
-            text: $t('知道了'),
-            fun: () => uiStore.popBoxList.shift(),
-        },
-        {
-            text: $t('下载更新…'),
-            master: true,
-            fun: () => openLink(getReleaseDownloadUrl(data)),
-        },
-    ]
     const popInfo = {
         template: markRaw(UpdatePan),
         templateValue: toRaw(info),
-        button: isUpdated ? [
+        allowQuickClose: false,
+        button: [
             {
-                text: $t('查看…'),
-                fun: () => openLink(data.html_url),
-            },
-            {
-                text: $t('知道了'),
-                master: true,
+                text: $t('稍后'),
                 fun: () => {
                     uiStore.popBoxList.shift()
+                    void update.close()
                 },
             },
-        ] : buttonGoUpdate,
+            {
+                text: $t('下载并安装'),
+                master: true,
+                fun: () => {
+                    void installTauriUpdate(update)
+                },
+            },
+        ],
     }
     uiStore.popBoxList.push(popInfo)
+}
+
+async function installTauriUpdate(update: Update) {
+    if (updaterInstallInProgress) return
+    updaterInstallInProgress = true
+    const uiStore = useUIStore()
+    const { $t } = app.config.globalProperties
+    uiStore.popBoxList.shift()
+
+    let downloaded = 0
+    let total: number | undefined
+    const progressPop = {
+        title: $t('正在更新'),
+        html: `<span>${$t('正在准备下载更新…')}</span>`,
+        allowClose: false,
+    }
+    uiStore.popBoxList.push(progressPop)
+
+    const refreshProgress = (event: DownloadEvent) => {
+        if (event.event === 'Started') {
+            total = event.data.contentLength
+        } else if (event.event === 'Progress') {
+            downloaded += event.data.chunkLength
+        } else if (event.event === 'Finished') {
+            progressPop.html = `<span>${$t('下载完成，正在安装…')}</span>`
+            return
+        }
+        const downloadedMb = (downloaded / 1024 / 1024).toFixed(1)
+        const progress = total && total > 0? `${downloadedMb} / ${(total / 1024 / 1024).toFixed(1)} MB（${Math.min(100, downloaded / total * 100).toFixed(1)}%）`: `${downloadedMb} MB`
+        progressPop.html = `<span>${$t('正在下载更新')} ${progress}</span>`
+    }
+
+    try {
+        await update.downloadAndInstall(refreshProgress, { timeout: 10 * 60 * 1000 })
+        await backend.call(undefined, 'win:relaunch', false)
+    } catch (e) {
+        logger.error(e as Error, '下载或安装更新失败')
+        if (uiStore.popBoxList[0] === progressPop) uiStore.popBoxList.shift()
+        await update.close().catch(() => {})
+        showUpdaterFailure($t('更新下载或安装失败，可以稍后重试或手动下载'))
+    } finally {
+        updaterInstallInProgress = false
+    }
+}
+
+function showUpdaterFailure(message: string) {
+    const uiStore = useUIStore()
+    const { $t } = app.config.globalProperties
+    uiStore.popBoxList.push({
+        title: $t('更新失败'),
+        html: `<span>${message}</span>`,
+        button: [
+            {
+                text: $t('手动下载'),
+                fun: () => {
+                    uiStore.popBoxList.shift()
+                    openLink(RELEASE_PAGE)
+                },
+            },
+            {
+                text: $t('关闭'),
+                master: true,
+                fun: () => uiStore.popBoxList.shift(),
+            },
+        ],
+    })
 }
 
 /**

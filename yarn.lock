@@ -1110,6 +1110,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tauri-apps/api@npm:^2.6.0":
+  version: 2.11.1
+  resolution: "@tauri-apps/api@npm:2.11.1"
+  checksum: 10c0/78a08a64ee7eab9d34bd4ba1bdc3a2440c7e9cc5737b3f1d77bd80fa38b0cb5e9601efe04da40c947c5da2ca38dc702bec21b4ae96b18ee5f3e82980d1f0b325
+  languageName: node
+  linkType: hard
+
 "@tauri-apps/api@npm:^2.8.0, @tauri-apps/api@npm:^2.9.0":
   version: 2.9.1
   resolution: "@tauri-apps/api@npm:2.9.1"
@@ -1265,6 +1272,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tauri-apps/plugin-updater@npm:2.9.0":
+  version: 2.9.0
+  resolution: "@tauri-apps/plugin-updater@npm:2.9.0"
+  dependencies:
+    "@tauri-apps/api": "npm:^2.6.0"
+  checksum: 10c0/72ce83d1c241308a13b9929f0900e4d33453875877009166e3998e3e75a1003ac48c3641086b4d3230f0f18c64f475ad6c3556d1603fc641ca50dc9c18d61866
+  languageName: node
+  linkType: hard
+
 "@tsconfig/node10@npm:^1.0.7":
   version: 1.0.12
   resolution: "@tsconfig/node10@npm:1.0.12"
@@ -1340,13 +1356,6 @@ __metadata:
   dependencies:
     undici-types: "npm:~6.21.0"
   checksum: 10c0/7599c24d80465c1aa6e29b53581fc20ad8862ff33e6eef31d05c1c706868476ee57319c89b802ea972dd4d64ce86d18020aa5344f851fb59b730ea509a63300f
-  languageName: node
-  linkType: hard
-
-"@types/semver@npm:^7.5.8":
-  version: 7.7.1
-  resolution: "@types/semver@npm:7.7.1"
-  checksum: 10c0/c938aef3bf79a73f0f3f6037c16e2e759ff40c54122ddf0b2583703393d8d3127130823facb880e694caa324eb6845628186aac1997ee8b31dc2d18fafe26268
   languageName: node
   linkType: hard
 
@@ -4514,7 +4523,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"semver@npm:^7.3.5, semver@npm:^7.3.6, semver@npm:^7.6.0, semver@npm:^7.6.3, semver@npm:^7.7.1":
+"semver@npm:^7.3.5, semver@npm:^7.3.6, semver@npm:^7.6.0, semver@npm:^7.6.3":
   version: 7.7.3
   resolution: "semver@npm:7.7.3"
   bin:
@@ -4660,9 +4669,9 @@ __metadata:
     "@tauri-apps/plugin-clipboard-manager": "npm:^2.3.0"
     "@tauri-apps/plugin-opener": "npm:^2"
     "@tauri-apps/plugin-shell": "npm:~2"
+    "@tauri-apps/plugin-updater": "npm:2.9.0"
     "@types/jsonpath": "npm:^0.2.4"
     "@types/node": "npm:^20.14.8"
-    "@types/semver": "npm:^7.5.8"
     "@vitejs/plugin-vue": "npm:^5.0.5"
     "@vue/eslint-config-typescript": "npm:^13.0.0"
     "@vuemap/vue-amap": "npm:^2.1.17"
@@ -4679,7 +4688,6 @@ __metadata:
     pinia: "npm:^3.0.3"
     pofile: "npm:^1.1.4"
     rollup-plugin-visualizer: "npm:^5.12.0"
-    semver: "npm:^7.7.1"
     spacingjs: "npm:^1.0.8"
     ts-node: "npm:^10.9.2"
     typescript: "npm:^5.5.2"

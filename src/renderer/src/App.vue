@@ -892,7 +892,7 @@ onMounted(() => {
         } else if (dev) {
             logger.system('开发者，由于 Stapxs QQ Lite 运行在调试模式下，分析组件并未初始化 …… 系统将无法捕获开发者阁下的访问状态，请悉知。')
         }
-        App.checkUpdate() // 检查更新
+        App.startUpdateChecks() // 启动签名更新检查与长期定时检查
         App.checkOpenTimes() // 检查打开次数
         App.checkNotice() // 检查公告
         // 加载愚人节附加

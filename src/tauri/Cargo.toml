@@ -67,4 +67,5 @@ windows-result = "0.3.2"
 secret-service = { version = "3", features = ["rt-tokio-crypto-rust"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2.2.2"

@@ -292,6 +292,39 @@
             </div>
         </div>
         <div v-if="backend.type === 'tauri'" class="ss-card">
+            <header>{{ $t('应用更新') }}</header>
+            <div class="tip">
+                {{ $t('更新包会经过签名验证，通过后才会安装。') }}
+            </div>
+            <div class="opt-item">
+                <div :class="checkDefault('auto_check_update')" />
+                <font-awesome-icon :icon="['fas', 'arrows-rotate']" />
+                <div>
+                    <label for="opt-function-auto-check-update">{{ $t('自动检查更新') }}</label>
+                    <span>{{ $t('启动后检查，并在客户端长期运行时定期检查') }}</span>
+                </div>
+                <label class="ss-switch">
+                    <input id="opt-function-auto-check-update" v-model="settingsStore.sysConfig.auto_check_update"
+                        type="checkbox" name="auto_check_update" @change="save">
+                    <div>
+                        <div />
+                    </div>
+                </label>
+            </div>
+            <div class="opt-item">
+                <font-awesome-icon :icon="['fas', 'download']" />
+                <div>
+                    <label>{{ $t('手动检查') }}</label>
+                    <span>{{ $t('立即检查是否有可安装的新版本') }}</span>
+                </div>
+                <button class="ss-button" type="button"
+                    :disabled="checkingUpdate"
+                    @click="runManualUpdateCheck">
+                    {{ checkingUpdate ? $t('检查中') : $t('检查') }}
+                </button>
+            </div>
+        </div>
+        <div v-if="backend.type === 'tauri'" class="ss-card">
             <header>{{ $t('消息存储') }}</header>
             <div class="tip">
                 {{
@@ -427,6 +460,7 @@
 
     import UmamiInfoPan from '@renderer/components/UmamiInfoPan.vue'
     import { backend } from '@renderer/runtime/backend'
+    import { checkUpdate } from '@renderer/function/utils/appUtil'
     import { dbClearImages, dbGetStats, dbRebuild } from '@renderer/function/utils/localHistoryUtil'
     import { useSettingsStore } from '@renderer/state/settings'
     import { useAuthStore } from '@renderer/state/auth'
@@ -442,6 +476,7 @@
     const dbStats = ref<{ totalMessages: number; imageCount: number; imageCacheBytes: number; dbSizeBytes: number } | null>(null)
     const clearImageProgressText = ref('')
     const rebuildingDatabase = ref(false)
+    const checkingUpdate = ref(false)
     const ndt = ref(0)
     const ndv = ref(false)
 
@@ -496,6 +531,16 @@
             ],
         }
         uiStore.popBoxList.push(popInfo)
+    }
+
+    async function runManualUpdateCheck() {
+        if (checkingUpdate.value) return
+        checkingUpdate.value = true
+        try {
+            await checkUpdate(true)
+        } finally {
+            checkingUpdate.value = false
+        }
     }
 
     function showUmamiInfo() {
