@@ -5,6 +5,7 @@ import {
     getHeartbeatIntervalSeconds,
     getHeartbeatTimeoutMs,
     isOneBotHeartbeat,
+    parseHeartbeatStatus,
 } from '../src/renderer/src/function/connectionHealth.ts'
 
 test('only treats heartbeat meta events as heartbeats', () => {
@@ -16,6 +17,18 @@ test('only treats heartbeat meta events as heartbeats', () => {
         post_type: 'meta_event',
         meta_event_type: 'heartbeat',
     }), true)
+})
+
+test('reads backend readiness from heartbeat status without coercion', () => {
+    assert.deepEqual(parseHeartbeatStatus({ online: true, good: false }), {
+        online: true,
+        good: false,
+    })
+    assert.deepEqual(parseHeartbeatStatus({ online: 1, good: 'yes' }), {
+        online: undefined,
+        good: undefined,
+    })
+    assert.deepEqual(parseHeartbeatStatus(undefined), {})
 })
 
 test('prefers the OneBot reported interval in milliseconds', () => {

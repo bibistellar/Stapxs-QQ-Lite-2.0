@@ -5,6 +5,8 @@ export const useConnectionStore = defineStore('connection', () => {
     const heartbeatTime = ref<number>(-1)
     const oldHeartbeatTime = ref<number>(-1)
     const lastHeartbeatTime = ref<number>(-1)
+    const backendOnline = ref<boolean | undefined>(undefined)
+    const backendGood = ref<boolean | undefined>(undefined)
     const backTimes = ref(0)
     const metaEventWatchTimer = ref<ReturnType<typeof setTimeout> | undefined>(undefined)
     const metaEventTimeoutTriggered = ref(false)
@@ -13,6 +15,8 @@ export const useConnectionStore = defineStore('connection', () => {
         heartbeatTime,
         oldHeartbeatTime,
         lastHeartbeatTime,
+        backendOnline,
+        backendGood,
         backTimes,
         metaEventWatchTimer,
         metaEventTimeoutTriggered,

@@ -75,6 +75,7 @@ import {
     getHeartbeatIntervalSeconds,
     getHeartbeatTimeoutMs,
     isOneBotHeartbeat,
+    parseHeartbeatStatus,
 } from './connectionHealth'
 import { confirmOutgoingMessage } from './outgoingMessage'
 
@@ -355,9 +356,9 @@ function refreshMetaEventWatchdog(interval: number) {
     const timeout = getHeartbeatTimeoutMs(interval)
     connectionStore.metaEventWatchTimer = setTimeout(() => {
         if (connectionStore.metaEventTimeoutTriggered) return
-        connectionStore.metaEventTimeoutTriggered = true
         connectionStore.metaEventWatchTimer = undefined
         logger.add(LogType.WS, '心跳包超时，准备断开连接')
+        // forceDisconnect 统一设置关闭标志；提前设置会使它把本次关闭误判为重复操作。
         Connector.forceDisconnect('心跳包超时')
     }, timeout)
 }
@@ -404,6 +405,9 @@ const noticeFunctions = {
         if (!isOneBotHeartbeat(msg)) return
 
         const connectionStore = useConnectionStore()
+        const status = parseHeartbeatStatus(msg.status)
+        connectionStore.backendOnline = status.online
+        connectionStore.backendGood = status.good
         if (connectionStore.lastHeartbeatTime < 0) {
             lastHeartbeatReceivedAt = -1
             heartbeatIntervalSeconds = -1
@@ -2526,6 +2530,8 @@ export function resetRimtime(resetAll = false) {
         connectionStore.heartbeatTime = -1
         connectionStore.oldHeartbeatTime = -1
         connectionStore.lastHeartbeatTime = -1
+        connectionStore.backendOnline = undefined
+        connectionStore.backendGood = undefined
         connectionStore.backTimes = 0
     }
 }
