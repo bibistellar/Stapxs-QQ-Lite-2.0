@@ -1604,7 +1604,7 @@ msgstr ""
 msgid "\"有效数据\"仅包含了访客中连接了 bot 的部分会话。"
 msgstr ""
 
-msgid "Stapxs QQ Lite 支持将消息缓存至本地，消息将以加密数据库的方式安全的保存。"
+msgid "消息会自动保存至本地加密数据库，此功能始终启用。"
 msgstr ""
 
 msgid "Tauri 代理服务似乎没有正常启动"

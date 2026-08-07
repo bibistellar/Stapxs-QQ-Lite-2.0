@@ -849,17 +849,15 @@ onMounted(() => {
         // 加载连接历史
         loginInfo.connectionHistory = loadConnectionHistory()
         // OneBot 是否在线不影响本地浏览：优先恢复最近一次账号的 SQLite 会话。
-        if (backend.type === 'tauri' && settingsStore.sysConfig.enable_local_history) {
-            const lastAccount = loginInfo.connectionHistory.find((item) => item.uin)
-            if (lastAccount?.uin) {
-                const restored = await restoreDatabaseSessions(
-                    lastAccount.uin,
-                    lastAccount.nickname,
-                )
-                if (restored > 0) {
-                    tags.page = 'Messages'
-                    tags.showChat = true
-                }
+        const lastAccount = loginInfo.connectionHistory.find((item) => item.uin)
+        if (lastAccount?.uin) {
+            const restored = await restoreDatabaseSessions(
+                lastAccount.uin,
+                lastAccount.nickname,
+            )
+            if (restored > 0) {
+                tags.page = 'Messages'
+                tags.showChat = true
             }
         }
         if (

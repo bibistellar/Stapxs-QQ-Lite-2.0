@@ -15,15 +15,13 @@ pub struct DbState(pub Mutex<DbStateInner>);
 
 pub struct DbStateInner {
     pub data_dir: PathBuf,
-    pub enabled: bool,
     pub conn: Option<Connection>,
 }
 
 impl DbState {
-    pub fn new(data_dir: PathBuf, enabled: bool) -> Self {
+    pub fn new(data_dir: PathBuf) -> Self {
         Self(Mutex::new(DbStateInner {
             data_dir,
-            enabled,
             conn: None,
         }))
     }
@@ -33,10 +31,6 @@ impl DbState {
         F: FnOnce(&Connection) -> Result<T, String>,
     {
         let mut inner = self.0.lock().map_err(|e| e.to_string())?;
-
-        if !inner.enabled {
-            return Err("本地历史消息存储未启用".to_string());
-        }
 
         if inner.conn.is_none() {
             let conn = open_db(inner.data_dir.clone()).map_err(|e| e.to_string())?;
@@ -51,19 +45,6 @@ impl DbState {
 
         f(conn)
     }
-}
-
-/// 运行时切换本地历史数据库，无需重启应用。
-/// 关闭时释放连接；再次开启后由下一次读写请求懒加载数据库。
-#[tauri::command]
-pub fn db_set_enabled(state: State<'_, DbState>, enabled: bool) -> Result<(), String> {
-    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
-    inner.enabled = enabled;
-    if !enabled {
-        inner.conn = None;
-    }
-    info!("本地历史消息缓存已{}", if enabled { "启用" } else { "关闭" });
-    Ok(())
 }
 
 // ── 数据结构 ────────────────────────────────────────────────

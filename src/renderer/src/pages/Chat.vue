@@ -283,7 +283,7 @@
                 <!-- 搜索指示器 -->
                 <div :class="details[3].open ? 'search-tag show' : 'search-tag'">
                     <font-awesome-icon :icon="['fas', 'search']" />
-                    <span>{{ settingsStore.sysConfig.enable_local_history ? $t('搜索已保存的消息') : $t('搜索已加载的消息') }}</span>
+                    <span>{{ $t('搜索已保存的消息') }}</span>
                     <div @click="closeSearch">
                         <font-awesome-icon :icon="['fas', 'xmark']" />
                     </div>
@@ -920,9 +920,7 @@ async function loadMoreHistory() {
     ) {
         const firstMsgId = list[0].message_id
         const firstMsgTime = Number(list[0]?.time)
-        const useMixedHistory =
-            settingsStore.sysConfig.enable_local_history &&
-            settingsStore.sysConfig.mixed_load_messages !== false
+        const useMixedHistory = settingsStore.sysConfig.mixed_load_messages !== false
         uiStore.nowGetHistory = true
         if (useMixedHistory && Number.isFinite(firstMsgTime)) {
             uiStore.historyBeforeTime = firstMsgTime
@@ -2419,7 +2417,7 @@ async function handleInput(event: Event) {
         if (value.length == 0) {
             searchRequestId.value++
             tags.value.search.list = reactive(list)
-        } else if (settingsStore.sysConfig.enable_local_history) {
+        } else {
             const requestId = ++searchRequestId.value
             searchDebounceTimer.value = setTimeout(async () => {
                 const results = await dbSearchMessages(
@@ -2430,14 +2428,6 @@ async function handleInput(event: Event) {
                 if (requestId !== searchRequestId.value || !details.value[3].open) return
                 tags.value.search.list = results
             }, 180)
-        } else {
-            searchRequestId.value++
-            tags.value.search.list = list.filter(
-                (item: any) => {
-                    const rawMessage = getMsgRawTxt(item)
-                    return rawMessage.indexOf(value) !== -1
-                },
-            )
         }
     }
 }

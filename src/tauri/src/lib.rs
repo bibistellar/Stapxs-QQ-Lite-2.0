@@ -88,13 +88,8 @@ pub fn run() {
                 .expect("无法获取 app data 目录");
             info!("应用数据目录: {:?}", data_dir);
 
-            // 按开关初始化 SQLite：关闭本地历史时跳过数据库和密钥初始化
-            let enable_local_history = store
-                .get("enable_local_history")
-                .map(|v| v.as_bool().unwrap_or_else(|| v.as_str() == Some("true")))
-                .unwrap_or(true);
-
-            app.manage(DbState::new(data_dir, enable_local_history));
+            // SQLite 本地消息数据库始终启用，连接仍按首次读写懒加载。
+            app.manage(DbState::new(data_dir));
 
             // 初始化全局通知管理器 ============
             let app_id = app.config().identifier.clone();
@@ -270,7 +265,6 @@ pub fn run() {
             commands::db::db_cache_image,
             commands::db::db_get_image,
             commands::db::db_clear_images,
-            commands::db::db_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

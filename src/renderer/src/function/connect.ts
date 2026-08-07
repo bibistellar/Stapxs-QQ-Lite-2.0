@@ -23,10 +23,7 @@ import { useSettingsStore } from '@renderer/state/settings'
 import { useAuthStore } from '@renderer/state/auth'
 import { useConnectionStore } from '@renderer/state/connection'
 import type { ConnectionAddress } from './connectionUrl'
-import {
-    resolveConnectionAddress,
-    toInsecureWebSocketAddress,
-} from './connectionUrl'
+import { resolveConnectionAddress } from './connectionUrl'
 
 const logger = new Logger()
 const popInfo = new PopInfo()
@@ -42,7 +39,6 @@ let reconnectAttempts = 0
 let wantConnected = false
 let connectionTarget: (ConnectionAddress & {
     token: string
-    fallbackAttempted: boolean
 }) | undefined = undefined
 let lifecycleHooksBound = false
 let lastReconnectNow = 0
@@ -141,7 +137,6 @@ export class Connector {
         connectionTarget = {
             ...resolved,
             token: token ?? '',
-            fallbackAttempted: false,
         }
         login.address = resolved.preferredAddress
         login.token = token ?? ''
@@ -308,7 +303,7 @@ export class Connector {
                     // 按退避节奏无限重连，不再需要用户手动重新登录
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
                     this.scheduleReconnect()
-                } else if (!this.tryInsecureProtocolFallback()) {
+                } else {
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('连接异常关闭'), false)
                 }
                 break
@@ -318,7 +313,7 @@ export class Connector {
                 if (wantConnected) {
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
                     this.scheduleReconnect()
-                } else if (!this.tryInsecureProtocolFallback()) {
+                } else {
                     popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('TLS错误'), false)
                 }
                 break
@@ -330,33 +325,6 @@ export class Connector {
         }
 
         logger.error(null, $t('连接失败') + ': ' + code)
-    }
-
-    /**
-     * 只有用户未填写协议的公网地址才允许首次 wss 失败后回退一次 ws。
-     * 显式输入的 wss 永远不会在客户端被降级。
-     */
-    private static tryInsecureProtocolFallback() {
-        if (
-            !connectionTarget ||
-            !connectionTarget.allowInsecureFallback ||
-            connectionTarget.fallbackAttempted
-        ) {
-            return false
-        }
-
-        const fallbackAddress =
-            toInsecureWebSocketAddress(connectionTarget.transportAddress)
-        if (fallbackAddress === connectionTarget.transportAddress) return false
-
-        connectionTarget.transportAddress = fallbackAddress
-        connectionTarget.fallbackAttempted = true
-        logger.add(LogType.WS, '未指定协议的 wss 首次握手失败，尝试回退到 ws')
-        const target = connectionTarget
-        window.setTimeout(() => {
-            if (connectionTarget === target) this.openCurrentTarget()
-        }, 0)
-        return true
     }
 
     // 连接器操作 =====================================================

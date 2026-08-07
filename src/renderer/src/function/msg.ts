@@ -200,7 +200,6 @@ export async function restoreDatabaseSessions(
     offlineNickname?: string,
 ) {
     const authStore = useAuthStore()
-    const settingsStore = useSettingsStore()
     const contactStore = useContactStore()
     if (offlineUin && !authStore.loginInfo?.uin) {
         authStore.loginInfo = {
@@ -211,8 +210,7 @@ export async function restoreDatabaseSessions(
     const uin = String(offlineUin ?? authStore.loginInfo?.uin ?? '')
     if (
         !uin ||
-        databaseSessionsRestoredFor === uin ||
-        settingsStore.sysConfig.enable_local_history !== true
+        databaseSessionsRestoredFor === uin
     ) return 0
 
     databaseSessionsRestoredFor = uin
@@ -1852,10 +1850,7 @@ async function saveMsg(msg: any, append = undefined as undefined | string) {
             const merged = mergeMessagesByIdAndTime(chatStore.messageList, list)
             replaceMessageListInPlace(merged)
         } else {
-            if (
-                settingsStore.sysConfig.enable_local_history &&
-                settingsStore.sysConfig.mixed_load_messages !== false
-            ) {
+            if (settingsStore.sysConfig.mixed_load_messages !== false) {
                 const merged = mergeMessagesByIdAndTime(chatStore.messageList, list)
                 replaceMessageListInPlace(merged)
             } else {

@@ -108,10 +108,7 @@ export async function loadHistory(info: BaseChatInfoElem) {
     // 否则其中任一异常消息或集中预处理都可能阻断聊天视图挂载。
     // 当前会话仍走下方经过验证的本地最新消息 + OneBot 实时请求链路。
     // 本地有数据时立即显示，同时仍发网络请求以获取最新消息（避免遗漏）
-    if (
-        settingsStore.sysConfig.enable_local_history &&
-        settingsStore.sysConfig.mixed_load_messages !== false
-    ) {
+    if (settingsStore.sysConfig.mixed_load_messages !== false) {
         const localMsgs = await dbGetLatest(
             authStore.loginInfo.uin,
             info.id,

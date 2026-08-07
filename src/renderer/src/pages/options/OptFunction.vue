@@ -293,29 +293,12 @@
         </div>
         <div v-if="backend.type === 'tauri'" class="ss-card">
             <header>{{ $t('消息存储') }}</header>
-            <div
-                class="opt-item"
-                :style="{ 'background': settingsStore.sysConfig.enable_local_history ? 'var(--color-card-1)' : 'none' }">
-                <div :class="checkDefault('enable_local_history')" />
-                <font-awesome-icon :icon="['fas', 'database']" />
-                <div>
-                    <label for="opt-function-enable-local-history">{{ $t('启用消息存储') }}</label>
-                    <span>{{ $t('保存消息记录何尝不是一种囤囤鼠') }}</span>
-                </div>
-                <label class="ss-switch">
-                    <input id="opt-function-enable-local-history" v-model="settingsStore.sysConfig.enable_local_history"
-                        type="checkbox" name="enable_local_history" @change="save">
-                    <div>
-                        <div />
-                    </div>
-                </label>
-            </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="tip">
+            <div class="tip">
                 {{
-                    $t('Stapxs QQ Lite 支持将消息缓存至本地，消息将以加密数据库的方式安全的保存。')
+                    $t('消息会自动保存至本地加密数据库，此功能始终启用。')
                 }}
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="opt-item">
+            <div class="opt-item">
                 <div :class="checkDefault('mixed_load_messages')" />
                 <font-awesome-icon :icon="['fas', 'shuffle']" />
                 <div>
@@ -332,7 +315,7 @@
                     </div>
                 </label>
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="opt-item">
+            <div class="opt-item">
                 <div :class="checkDefault('disable_local_history_image_cache')" />
                 <font-awesome-icon :icon="['fas', 'image']" />
                 <div>
@@ -349,7 +332,7 @@
                     </div>
                 </label>
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history && dbStats != null" class="db-stats-cards">
+            <div v-if="dbStats != null" class="db-stats-cards">
                 <div class="db-stat-card">
                     <font-awesome-icon :icon="['fas', 'message']" />
                     <span class="db-stat-value">{{ dbStats.totalMessages.toLocaleString() }}</span>
@@ -450,15 +433,7 @@
     const ndv = ref(false)
 
     watch(() => authStore.loginInfo.uin, (uin) => {
-        if (uin && settingsStore.sysConfig.enable_local_history) {
-            loadDbStats()
-        }
-    }, { immediate: true })
-
-    watch(() => settingsStore.sysConfig.enable_local_history, (enabled) => {
-        if (enabled && authStore.loginInfo.uin) {
-            loadDbStats()
-        }
+        if (uin) loadDbStats()
     }, { immediate: true })
 
     async function loadDbStats() {

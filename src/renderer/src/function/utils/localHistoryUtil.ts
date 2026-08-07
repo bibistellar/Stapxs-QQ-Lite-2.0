@@ -2,7 +2,7 @@
  * @FileDescription: 本地历史消息工具（Tauri 平台）
  * @Description:
  *   封装对 Tauri 后端 db_* 命令的调用，提供类型安全的本地 SQLite 历史消息读写接口。
- *   非 Tauri 平台调用时会静默 no-op / 返回空数组，不影响其他平台逻辑。
+ *   数据库在 Tauri 桌面端始终启用。
  */
 
 import { backend } from '@renderer/runtime/backend'
@@ -38,18 +38,12 @@ export interface LocalMsgRecord {
     revoked: boolean
 }
 
-function isTauriHistoryAvailable(): boolean {
-    const settingsStore = useSettingsStore()
-    return backend.type === 'tauri' && settingsStore.sysConfig.enable_local_history === true
-}
-
 async function callDbRecordList(
     selfId: string | number,
     command: string,
     payload: Record<string, any>,
     errorTag: string,
 ): Promise<any[]> {
-    if (!isTauriHistoryAvailable()) return []
     try {
         const records: LocalMsgRecord[] = await backend.call(
             undefined,
@@ -71,7 +65,6 @@ async function callDb(
     fallback: any,
     errorTag: string,
 ): Promise<any> {
-    if (!isTauriHistoryAvailable()) return fallback
     try {
         return await backend.call(
             undefined,
@@ -189,8 +182,6 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
  * @param msgs    已完成预处理的消息对象数组（来自 chatStore.messageList 或 newMsg）
  */
 export async function dbSaveMessages(selfId: string | number, msgs: any[]): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
-
     const persistableMsgs = ensureChatIdOnMsgs(selfId, msgs)
     const records: LocalMsgRecord[] = persistableMsgs
         .map(msgToRecord)
@@ -222,7 +213,7 @@ export async function saveMessagesWithSideEffects(selfId: string | number, msgs:
 /**
  * 获取某会话最新 n 条本地消息（正序，revoked 消息不包含）。
  *
- * @returns 消息段数组已反序列化的消息对象数组，出错或非 Tauri 返回空数组
+ * @returns 消息段数组已反序列化的消息对象数组，出错时返回空数组
  */
 export async function dbGetLatest(
     selfId: string | number,
@@ -300,14 +291,14 @@ export async function dbRevokeMessage(
 /**
  * 在指定会话的本地 DB 中按关键词搜索消息（对 raw_message 做 LIKE 匹配）。
  *
- * @returns 匹配消息列表（正序），出错或非 Tauri 返回空数组
+ * @returns 匹配消息列表（正序），出错时返回空数组
  */
 export async function dbSearchMessages(
     selfId: string | number,
     chatId: number,
     query: string,
 ): Promise<any[]> {
-    if (!isTauriHistoryAvailable() || !query) return []
+    if (!query) return []
     return callDbRecordList(selfId, 'db:searchMessages', { chatId, query }, '[LocalHistory] dbSearchMessages 失败')
 }
 
@@ -338,8 +329,6 @@ export async function dbCacheImage(
     mimeType: string,
     data: string,
 ): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
-
     try {
         await backend.call(undefined, 'db:cacheImage', true, {
             selfId: String(selfId),
@@ -382,12 +371,8 @@ export async function dbClearImages(
     selfId: string | number,
     onProgress?: (progress: DbClearImagesProgress) => void,
 ): Promise<DbClearImagesResult> {
-    if (!isTauriHistoryAvailable()) {
-        return { total: 0, deleted: 0, batches: 0 }
-    }
-
     let unlisten: undefined | (() => void | Promise<void>)
-    if (onProgress && backend.type === 'tauri') {
+    if (onProgress) {
         const { listen } = await import('@tauri-apps/api/event')
         unlisten = await listen<DbClearImagesProgress>('db:clearImagesProgress', (event) => {
             const payload = event.payload
@@ -422,7 +407,6 @@ export async function dbClearImages(
  * 已缓存的图片（url_hash 命中）不会重复下载。
  */
 async function cacheImagesFromMsgs(selfId: string | number, msgs: any[]): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
     const urls = extractImageUrlsFromMsgs(msgs)
     for (const url of urls) {
         try {
