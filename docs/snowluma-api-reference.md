@@ -400,14 +400,15 @@ SnowLuma WebUI 可以为账号开启登录历史补齐，但该能力只能作�
 
 后续实现前需要注意：
 
-- SnowLuma 映射当前重定向到 `Lagrange.OneBot`。
-- 继承的消息映射没有把 SnowLuma 的 `message_seq` 保存为本地 `seq_id`。
+- 客户端只加载独立的 SnowLuma 映射；Lagrange、NapCat 与 LLOneBot 映射及动态选择
+  逻辑已经移除。
+- 消息映射会把 SnowLuma 的 `message_seq` 保存为本地 `seq_id`。
 - 当前启动补拉主要使用 `message_id: 0`，没有使用 `reverse_order: false` 从本地最新
   锚点向前补消息。
 - 客户端只使用 OneBot 心跳 watchdog 判活：每帧心跳刷新超时计时，并记录
   `status.online/good`；不再叠加 Rust 主动 Ping 或周期 `get_status` 探针。
-- `get_recent_contact` 恒空时，项目当前存在大范围联系人探测逻辑；SnowLuma 下应改为
-  SQLite 最近会话优先，联系人探测仅作为限量、低优先级兜底。
+- 客户端不再调用恒空的 `get_recent_contact`，也不再扫描联系人探测会话；启动时先从
+  SQLite 恢复最近会话，再仅对这些已知会话错峰补拉临近消息。
 - 历史接口返回锚点，客户端合并逻辑必须始终按字符串化的 `message_id` 去重。
 
 ## 官方源码索引

@@ -36,25 +36,6 @@
                     </select>
                 </div>
             </div>
-            <div class="opt-item">
-                <font-awesome-icon :icon="['fas', 'gear']" />
-                <div>
-                    <label for="opt-dev-json-map">{{ $t('解析配置') }}</label>
-                    <span>{{
-                        $t('不同框架之间的化学反应我们将其称之为达利园效应')
-                    }}</span>
-                </div>
-                <div class="select-wrapper">
-                    <select id="opt-dev-json-map" v-model="jsonMapName" @change="changeJsonMap">
-                        <option v-if="jsonMapName == ''" value="">
-                            {{ $t('未连接') }}
-                        </option>
-                        <option v-for="item in getPathMapList()" :key="item" :value="item">
-                            {{ item.replace('Chat', '') }}
-                        </option>
-                    </select>
-                </div>
-            </div>
         </div>
 
         <div class="ss-card">
@@ -288,7 +269,7 @@
     import { i18n } from '@renderer/main'
     import packageInfo from '../../../../../package.json'
 
-    import { ref, onMounted, watch, useTemplateRef, markRaw } from 'vue'
+    import { ref, onMounted, useTemplateRef, markRaw } from 'vue'
     import {
         runASWEvent as save,
         saveAll,
@@ -304,7 +285,6 @@
     import { BrowserInfo, detect } from 'detect-browser'
     import { BotMsgType } from '@renderer/function/elements/information'
     import { uptime } from '@renderer/main'
-    import { loadJsonMap } from '@renderer/function/utils/appUtil'
     import { backend } from '@renderer/runtime/backend'
     import RawMsgRenderPreviewPan from '@renderer/components/RawMsgRenderPreviewPan.vue'
     import { useSettingsStore } from '@renderer/state/settings'
@@ -321,18 +301,12 @@
 
     const dev = import.meta.env.DEV
 
-    const jsonMapName = ref(authStore.jsonMap?.name ?? '')
     const ws_text = ref('')
     const parse_text = ref('')
     const appmsg_text = ref('')
     const customCssLoaded = ref(false)
     const customCssSize = ref('')
     const cssFileInput = useTemplateRef<HTMLInputElement>('cssFileInput')
-
-    watch(
-        () => authStore.jsonMap?.name,
-        () => { jsonMapName.value = authStore.jsonMap?.name ?? '' },
-    )
 
     onMounted(() => {
         // 检查是否已加载自定义 CSS
@@ -624,21 +598,6 @@
             case BotMsgType.Array:
                 return $t('Array 数组')
         }
-    }
-
-    function getPathMapList() {
-        const pathMap = import.meta.glob('@renderer/assets/pathMap/*.yaml')
-        const pathMapList: string[] = []
-        Object.keys(pathMap).forEach((key: string) => {
-            const name = key.split('/').pop()?.replace('.yaml', '')
-            if (name) pathMapList.push(name)
-        })
-        return pathMapList
-    }
-
-    function changeJsonMap() {
-        const getPath = loadJsonMap(jsonMapName.value)
-        if (getPath) authStore.jsonMap = getPath
     }
 
     // 查看配置文件

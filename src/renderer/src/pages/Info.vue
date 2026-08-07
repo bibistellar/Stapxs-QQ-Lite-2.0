@@ -31,28 +31,13 @@
                     <header>
                         <span>{{ $t('介绍') }}</span>
                     </header>
-                    <span v-html=" chat.info.group_info.gIntro === undefined || chat.info.group_info.gIntro === '' ?
-                        $t('群主很懒，还没有群介绍哦～') : chat.info.group_info.gIntro" />
-                    <div class="tags">
-                        <div v-for="item in chat.info.group_info.tags" :key="item.md">
-                            {{ item.tag }}
-                        </div>
-                    </div>
+                    <span>{{ chat.info.group_info.group_memo || $t('群主很懒，还没有群介绍哦～') }}</span>
                 </div>
                 <div v-else-if="chat.show.type === 'user'">
-                    <header v-if="chat.info.user_info.qid">
-                        <span>QID</span>
-                    </header>
-                    <span v-if="chat.info.user_info.qid">{{ chat.info.user_info.qid }}</span>
                     <header>
                         <span>{{ $t('等级') }}</span>
                     </header>
                     <span>{{ qqLevelToEmoji(chat.info.user_info.qqLevel) }}</span>
-                    <header v-if="chat.info.user_info.regTime">
-                        <span>{{ $t('注册时间') }}</span>
-                    </header>
-                    <span v-if="chat.info.user_info.regTime">{{ Intl.DateTimeFormat(trueLang, { year: 'numeric' })
-                        .format(new Date(chat.info.user_info.regTime * 1000)) }}</span>
                     <header>
                         <span>{{ $t('签名') }}</span>
                     </header>
@@ -61,27 +46,11 @@
                         <span>{{ $t('其他信息') }}</span>
                     </header>
                     <div class="outher">
-                        <span v-if="chat.info.user_info.birthday_year">{{ $t('生日') }}:
-                            <span>
-                                {{ Intl.DateTimeFormat(trueLang, {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric',
-                                }).format(new Date(
-                                    `${chat.info.user_info.birthday_year}-${
-                                        chat.info.user_info.birthday_month}-${
-                                        chat.info.user_info.birthday_day}`,
-                                )) }}
-                            </span>
+                        <span v-if="chat.info.user_info.age > 0">
+                            {{ $t('年龄') }}: {{ chat.info.user_info.age }}
                         </span>
-                        <span v-if="chat.info.user_info.country">{{ $t('地区') }}:
-                            <span>
-                                {{
-                                    `${chat.info.user_info.country}-${
-                                        chat.info.user_info.province}-${
-                                        chat.info.user_info.city}`
-                                }}
-                            </span>
+                        <span v-if="chat.info.user_info.sex && chat.info.user_info.sex !== 'unknown'">
+                            {{ $t('性别') }}: {{ chat.info.user_info.sex }}
                         </span>
                     </div>
                     <!-- <template v-if="!chat.show.temp">
@@ -241,7 +210,7 @@ import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import { Connector } from '@renderer/function/connect'
 import { PopInfo, PopType } from '@renderer/function/base'
 import { toRaw, ref, nextTick } from 'vue'
-import { delay, getTrueLang } from '@renderer/function/utils/systemUtil'
+import { delay } from '@renderer/function/utils/systemUtil'
 import { useAuthStore } from '@renderer/state/auth'
 import { useContactStore } from '@renderer/state/contact'
 import { useChatStore } from '@renderer/state/chat'
@@ -269,9 +238,6 @@ const emit = defineEmits<{
 }>()
 
 const { t: $t } = i18n.global
-
-// Constants
-const trueLang = getTrueLang()
 
 // Reactive state
 const number_cache = ref<any[]>([])

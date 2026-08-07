@@ -252,21 +252,7 @@ function addBaseFace(id: number) {
 //#region == 漫游表情相关函数 ===========
 function reloadRoamingStamp() {
     stickerStore.stickerCache = undefined
-    if (authStore.jsonMap.roaming_stamp.pagerType == 'full') {
-        // 全量分页，返回所有内容
-        Connector.send(
-            authStore.jsonMap.roaming_stamp.name,
-            { count: 48 },
-            'getRoamingStamp_48',
-        )
-    } else {
-        // 默认不分页，返回所有内容
-        Connector.send(
-            authStore.jsonMap.roaming_stamp.name,
-            {},
-            'getRoamingStamp',
-        )
-    }
+    Connector.send('fetch_custom_face', { count: 48 }, 'getRoamingStamp_48')
 }
 function stickersScroll(e: Event) {
     const target = e.target as HTMLDivElement
@@ -276,12 +262,10 @@ function stickersScroll(e: Event) {
         target.clientHeight + 0.5
     ) {
         if (stickerStore.stickerCache) {
-            if (authStore.jsonMap.roaming_stamp.pagerType == 'full' &&
-                stickerStore.stickerCache[stickerStore.stickerCache.length - 1] != 'end') {
+            if (stickerStore.stickerCache[stickerStore.stickerCache.length - 1] != 'end') {
                 const count = 48 + 48 * stickerPage.value
-                // 全量分页，返回所有内容（napcat 行为）
                 Connector.send(
-                    authStore.jsonMap.roaming_stamp.name,
+                    'fetch_custom_face',
                     { count: count },
                     'getRoamingStamp_' + count,
                 )

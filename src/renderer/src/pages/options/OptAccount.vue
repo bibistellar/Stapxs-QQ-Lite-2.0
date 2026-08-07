@@ -176,7 +176,7 @@ function setNick(event: KeyboardEvent) {
     // TODO: 这玩意的返回好像永远是错误的 …… 所以干脆不处理返回了
     if (event.key === 'Enter' && authStore.loginInfo.nickname !== '') {
         Connector.send(
-            'set_nickname',
+            'set_qq_profile',
             { nickname: authStore.loginInfo.nickname },
             'setNickname',
         )
@@ -191,8 +191,8 @@ function setLNick(event: KeyboardEvent) {
     // TODO: 这玩意的返回好像永远是错误的 …… 所以干脆不处理返回了
     if (event.key === 'Enter' && authStore.loginInfo.info.lnick !== '') {
         Connector.send(
-            'set_signature',
-            { signature: authStore.loginInfo.info.lnick },
+            'set_qq_profile',
+            { personal_note: authStore.loginInfo.info.lnick },
             'setSignature',
         )
     }

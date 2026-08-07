@@ -1,15 +1,15 @@
-# SnowLuma 消息结构声明
-# https://github.com/botuniverse/onebot-11
-# PS：解析中可以使用 jsonpath，左斜杠开头则表示为当前位置
+# SnowLuma OneBot v11 数据结构声明
+# https://github.com/SnowLuma/SnowLuma/tree/main/packages/onebot/src/actions
+# 解析中可以使用 JSONPath，左斜杠开头表示读取当前对象的直接字段。
 
-# Bot 名称
 name: SnowLuma
-# SnowLuma 是标准的 OneBot v11 实现，绝大部分结构与 Lagrange.OneBot 一致
-redirect: Lagrange.OneBot
 
-# 群、好友列表
-# PS：和 Lagrange 的区别在于 SnowLuma 的好友项是平铺的（user_id、nickname、remark），
-#     没有嵌套的 group 字段，所以不存在好友分组
+version_info: $.data
+login_info:
+    uin: $.data.user_id
+    bkn: ''
+    nickname: $.data.nickname
+
 user_list:
     name: get_friend_list|get_group_list
     source: $.data[*]
@@ -18,17 +18,157 @@ user_list:
         group_name: /group_name
         member_count: /member_count
         admin_flag: null
-
         class_id: null
         class_name: null
         user_id: /user_id
         nickname: /nickname
         remark: /remark
 
-# 消息转义
-# PS：Lagrange 的图片段把地址放在 file 里，所以它的转义是 url <- file；
-#     SnowLuma 遵循 OneBot v11，file 只是文件名（如 xxx.jpg），真正的地址在 url 里，
-#     沿用 Lagrange 的转义会把 url 覆盖成文件名，导致图片无法显示
+roaming_stamp:
+    name: fetch_custom_face
+
+message_list:
+    name: get_group_msg_history
+    private_name: get_friend_msg_history
+    source: $.data.messages[*]
+    type: $.data
+    message_type:
+        user: private
+        group: group
+    list:
+        message_id: /message_id
+        seq_id: /message_seq
+        target_id: /target_id
+        message_type: /message_type
+        time: /time
+        post_type: /post_type
+        group_id: /group_id
+        sender: /sender
+        message: /message
+        raw_message: /raw_message
+
+forward_msg:
+    name: get_forward_msg
+    source: $.data.messages[*]
+
+message_info:
+    message_id: $.message_id
+    private_id: $.user_id
+    group_id: $.group_id
+    target_id: $.target_id
+    sender: $.sender.user_id
+
+get_message:
+    name: get_msg
+    source: $.data
+
 message_value:
     image:
         url: $.url
+
+set_message_read:
+    name: mark_group_msg_as_read
+    private_name: mark_private_msg_as_read
+
+group_notices:
+    name: _get_group_notice
+    source: $.data[*]
+    list:
+        content: $.message.text
+        sender: /sender_id
+        time: /publish_time
+        img_id: $.message.images.0.id
+        is_read: null
+        read_num: null
+
+group_files:
+    name: get_group_root_files
+    source: $.data.*[*]
+    list:
+        file_id: /file_id
+        file_name: /file_name
+        size: /file_size
+        download_times: /download_times
+        dead_time: /dead_time
+        upload_time: /modify_time
+        uploader_name: /uploader_name
+        folder_id: /folder_id
+        folder_name: /folder_name
+        count: /total_file_count
+        create_time: /create_time
+        creater_name: /create_name
+
+group_folder_files:
+    name: get_group_files_by_folder
+
+file_download:
+    name: get_group_file_url
+    private_name: get_private_file_url
+    source: $.data
+    list:
+        file_url: /url
+        file_size: /file_size
+
+group_essence:
+    name: get_essence_msg_list
+    source: $.data[*]
+    list:
+        sender_uin: /sender_id
+        sender_nick: /sender_nick
+        sender_time: /sender_time
+        content: /content
+        add_digest_uin: /operator_id
+        add_digest_nick: /operator_nick
+        add_digest_time: /operator_time
+
+friend_info:
+    name: get_stranger_info
+    source: $.data
+    list:
+        user_id: /user_id
+        longNick: /long_nick
+        qqLevel: /qq_level
+        age: /age
+        sex: /sex
+
+group_info:
+    name: get_group_info
+    source: $.data
+
+group_member_info:
+    name: get_group_member_info
+    source: $.data
+    list:
+        group_id: /group_id
+        user_id: /user_id
+        nickname: /nickname
+        card: /card
+        sex: /sex
+        age: /age
+        join_time: /join_time
+        last_sent_time: /last_sent_time
+        shut_up_timestamp: /shut_up_timestamp
+        role: /role
+
+set_group_nickname:
+    name: set_group_card
+leave_group:
+    name: set_group_leave
+set_group_name:
+    name: set_group_name
+ban_mumber:
+    name: set_group_ban
+set_group_title:
+    name: set_group_special_title
+send_respond:
+    name: set_group_reaction
+poke:
+    name: group_poke
+    private_name: friend_poke
+delete_msg:
+    name: delete_msg
+get_record:
+    name: get_record
+    file: $..file
+    url: $..url
+    base64: $..base64

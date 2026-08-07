@@ -26,7 +26,6 @@ import {
     updateBaseOnMsgList,
     updateLastestHistory,
     sendMsgAppendInfo,
-    restoreLocalSessions,
 } from '@renderer/function/utils/msgUtil'
 import {
     delay,
@@ -37,10 +36,10 @@ import {
     reloadUsers,
     reloadCookies,
     updateMenu,
-    loadJsonMap,
     sendIdentifyData,
     sendStatEvent,
 } from '@renderer/function/utils/appUtil'
+import snowLumaMap from '@renderer/assets/pathMap/SnowLuma.yaml'
 import { reactive, markRaw, nextTick } from 'vue'
 import { PopInfo, PopType, Logger, LogType } from './base'
 import { Connector, login, saveConnectionToHistory } from './connect'
@@ -80,16 +79,7 @@ import {
 import { confirmOutgoingMessage } from './outgoingMessage'
 
 const popInfo = new PopInfo()
-// eslint-disable-next-line
-const msgPaths = import.meta.glob("@renderer/assets/pathMap/*.yaml", { eager: true })
-// 取出包含 Lagrange.OneBot.yaml 的那条
-const msgPathAt = Object.keys(msgPaths).find((item) => {
-    return item.indexOf('Lagrange.OneBot.yaml') > 0
-})
-let msgPath = {} as { [key: string]: any }
-if (msgPathAt != undefined) {
-    msgPath = (msgPaths[msgPathAt] as any).default
-}
+const msgPath = snowLumaMap
 // 其他 tag
 let listLoadTimes = 0
 const logger = new Logger()
@@ -99,10 +89,8 @@ let loginWaveTimer: any = null
 const RECENT_HISTORY_SECONDS = 24 * 60 * 60
 const RECENT_HISTORY_COUNT = 200
 const RECENT_HISTORY_SESSION_LIMIT = 50
-const RECENT_HISTORY_PROBE_LIMIT = 500
 const RECENT_HISTORY_REQUEST_GAP = 250
 const recentHistoryRequested = new Set<number>()
-const recentHistoryProbed = new Set<number>()
 let databaseSessionsRestoredFor = ''
 
 function findOutgoingMessage(chatId: number, messageId?: string | number) {
@@ -163,25 +151,22 @@ function normalizeSeconds(value: unknown) {
 }
 
 /** 登录后错峰预取最近 24 小时活跃会话，避免同时向 OneBot 发出大量请求。 */
-function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false) {
-    const authStore = useAuthStore()
+function scheduleRecentHistoryBootstrap(candidates?: any[]) {
     const contactStore = useContactStore()
     const now = Math.floor(Date.now() / 1000)
     const cutoff = now - RECENT_HISTORY_SECONDS
     const source = candidates ?? [...contactStore.baseOnMsgList.values()]
-    const sessions = probeUnknown? source.slice(0, RECENT_HISTORY_PROBE_LIMIT): source.filter((item) => {
+    const sessions = source.filter((item) => {
             const time = normalizeSeconds(item.time)
             return time === 0 || time >= cutoff
         }).slice(0, RECENT_HISTORY_SESSION_LIMIT)
 
     sessions.forEach((item, index) => {
         const id = Number(item.user_id ?? item.group_id)
-        const seen = probeUnknown ? recentHistoryProbed : recentHistoryRequested
-        if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
+        if (!Number.isFinite(id) || id <= 0 || recentHistoryRequested.has(id)) return
         const type = item.chat_type == 2 || item.group_id != undefined ? 'group' : 'user'
-        const name = type === 'group'? authStore.jsonMap.message_list?.name: authStore.jsonMap.message_list?.private_name
-        if (!name) return
-        seen.add(id)
+        const name = type === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history'
+        recentHistoryRequested.add(id)
         window.setTimeout(() => {
             if (!login.status) return
             Connector.send(name, {
@@ -189,9 +174,9 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
                 user_id: type !== 'group' ? id : undefined,
                 message_id: 0,
                 message_seq: 0,
-                count: probeUnknown ? 1 : RECENT_HISTORY_COUNT,
-            }, probeUnknown? `getChatHistoryBootstrapProbe_${id}_${type}`: `getChatHistoryBootstrap_${id}_${type}`)
-        }, index * (probeUnknown ? 100 : RECENT_HISTORY_REQUEST_GAP))
+                count: RECENT_HISTORY_COUNT,
+            }, `getChatHistoryBootstrap_${id}_${type}`)
+        }, index * RECENT_HISTORY_REQUEST_GAP)
     })
 }
 
@@ -724,11 +709,6 @@ const msgFunctions = {
                 sendIdentifyData({ bot_version: appInfo })
             }
             if (!login.status) {
-                // 尝试动态载入对应的 pathMap
-                if (data.app_name !== undefined) {
-                    const getMap = loadJsonMap(data.app_name)
-                    if (getMap != null) msgPath = getMap
-                }
                 // 继续获取后续内容
                 Connector.send('get_login_info', {}, 'getLoginInfo')
             }
@@ -777,15 +757,6 @@ const msgFunctions = {
     },
 
     /**
-     * 补充登录信息
-     * @deprecated 功能在后期更新中未被重构检查，可能存在问题
-     */
-    getMoreLoginInfo: (_: string, msg: { [key: string]: any }) => {
-        const authStore = useAuthStore()
-        authStore.loginInfo.info = msg.data.data.result.buddy.info_list[0]
-    },
-
-    /**
      * 保存好友列表
      */
     getGroupList: (_: string, msg: { [key: string]: any }) => {
@@ -793,37 +764,6 @@ const msgFunctions = {
     },
     getFriendList: (_: string, msg: { [key: string]: any }) => {
         saveUser(msg, 'friend')
-    },
-
-    /**
-     * 保存分组信息（独立保存）
-     */
-    getFriendCategory: (_: string, msg: { [key: string]: any }) => {
-        const contactStore = useContactStore()
-        const list = getMsgData(
-            'friend_category',
-            msg,
-            msgPath.friend_category,
-        ) as {
-            class_id: number
-            class_name: string
-            sort_id: number
-            users: number[]
-        }[]
-        if (list != undefined) {
-            saveClassInfo(list)
-        }
-        // 刷新用户列表的分类信息
-        list.forEach((item) => {
-            item.users.forEach((id) => {
-                contactStore.userList.forEach((user) => {
-                    if (user.user_id == id && user.class_id == undefined) {
-                        user.class_id = item.class_id
-                        user.class_name = item.class_name
-                    }
-                })
-            })
-        })
     },
 
     /**
@@ -982,30 +922,6 @@ const msgFunctions = {
             }
         }).catch((e) => logger.error(e as Error, '预取最近会话历史失败'))
     },
-    getChatHistoryBootstrapProbe: (
-        _: string,
-        msg: { [key: string]: any },
-        metaArgs?: string[],
-    ) => {
-        const id = Number(metaArgs?.[1])
-        if (!Number.isFinite(id) || msg.data === null) return
-        const cutoff = Math.floor(Date.now() / 1000) - RECENT_HISTORY_SECONDS
-        void normalizeMessagesFromPayload(msg).then((list) => {
-            const latest = list?.[list.length - 1]
-            if (!latest || normalizeSeconds(latest.time) < cutoff) return
-            const contactStore = useContactStore()
-            const contact = contactStore.userList.find((item) =>
-                Number(item.user_id ?? item.group_id) === id)
-            if (contact) {
-                const isGroup = metaArgs?.[2] === 'group'
-                Object.assign(contact, formatMessageData(latest, isGroup))
-                contactStore.baseOnMsgList.set(id, contact)
-                // baseOnMsgList 是会话数据源，立即重算显示列表，否则历史虽已拉取但首页仍为空。
-                updateBaseOnMsgList()
-                scheduleRecentHistoryBootstrap([contact])
-            }
-        }).catch((e) => logger.error(e as Error, '探测最近会话历史失败'))
-    },
     getChatHistory: (_: string, msg: { [key: string]: any }) => {
         const uiStore = useUIStore()
         if (msg.data === null) {
@@ -1130,47 +1046,35 @@ const msgFunctions = {
         msg: { [key: string]: any },
         echoList: string[],
     ) => {
-        const authStore = useAuthStore()
         const getCount = Number(echoList[1])
         const data = msg.data
-        if (msgPath.roaming_stamp.reverse) {
-            data.reverse()
-        }
         const stickerStore = useStickerStore()
         const stickerCache = stickerStore.stickerCache ?? []
         if (stickerCache.length == 0) {
             stickerStore.stickerCache = data
-        } else if (authStore.jsonMap.roaming_stamp.pagerType == 'full') {
-            // 全量分页模式下不追加
+        } else {
+            // SnowLuma 的 count 返回从头开始的完整前缀，直接替换旧结果。
             if (getCount > stickerCache.length + 48) {
-                // 已经获取到所有内容了
                 data.push('end')
             }
             stickerStore.stickerCache = data
-        } else {
-            stickerStore.stickerCache = stickerCache.concat(data)
         }
     },
 
     /**
-     * 保存群补充信息
-     * @deprecated 功能在后期更新中未被重构检查，可能存在问题
+     * 保存 SnowLuma 群资料
      */
-    getMoreGroupInfo: (_: string, msg: { [key: string]: any }) => {
+    getGroupInfo: (_: string, msg: { [key: string]: any }) => {
         const chatStore = useChatStore()
-        chatStore.chatInfo.info.group_info = msg.data.data
+        if (msg.data) chatStore.chatInfo.info.group_info = msg.data
     },
 
     /**
-     * 保存好友补充信息
-     * @deprecated 功能在后期更新中未被重构检查，可能存在问题
+     * 保存 SnowLuma 好友资料
      */
     getMoreUserInfo: (_: string, msg: { [key: string]: any }) => {
         const chatStore = useChatStore()
-        // chatStore.chatInfo.info.user_info =
-        //     msg.data.data.result.buddy.info_list[0]
         const data = getMsgData('friend_info', msg, msgPath.friend_info)[0]
-        data.regTime = new Date(data.reg_time).getTime()
         if (data) {
             chatStore.chatInfo.info.user_info = data
         }
@@ -1401,96 +1305,10 @@ const msgFunctions = {
     },
 
     /**
-     * 设置消息已读
-     */
-    readMemberMessage: (_: string, msg: { [key: string]: any }) => {
-        const authStore = useAuthStore()
-        const data = msg.data[0]
-        const msgName = authStore.jsonMap.set_message_read.private_name
-        let private_name = authStore.jsonMap.set_message_read.private_name
-        if (!private_name) private_name = msgName
-        if (data.group_id != undefined) {
-            Connector.send(
-                msgName,
-                {
-                    message_id: data.message_id,
-                    group_id: data.group_id,
-                },
-                'setMessageRead',
-            )
-        } else {
-            Connector.send(
-                private_name,
-                {
-                    message_id: data.message_id,
-                    user_id: data.self_id,
-                },
-                'setMessageRead',
-            )
-        }
-        // 关闭所有通知
-        new Notify().closeAll(data.group_id ?? data.self_id)
-    },
-
-    /**
      * 系统通知后处理
      */
     setFriendAdd: updateSysInfo,
     setGroupAdd: updateSysInfo,
-
-    /**
-     * 获取会话历史
-     */
-    getRecentContact: (_: string, data: any) => {
-        const authStore = useAuthStore()
-        const contactStore = useContactStore()
-        const settingsStore = useSettingsStore()
-        const list = getMsgData('recent_contact', data, msgPath.recent_contact)
-        if (list != undefined) {
-            // user_id: /peerUin
-            // time: /msgTime
-            // chat_type: /chatType
-            // 过滤掉 chatType 不是 1 和 2 的
-            let back = list.filter((item) => {
-                return item.chat_type == 1 || item.chat_type == 2
-            })
-            // 排除掉在置顶列表里的
-            const topList = settingsStore.sysConfig.top_info as {
-                [key: string]: number[]
-            } | null
-            if (topList != null) {
-                const top = topList[authStore.loginInfo.uin]
-                if (top != undefined) {
-                    back = back.filter((item) => {
-                        return top.indexOf(Number(item.user_id)) == -1
-                    })
-                }
-            }
-            // 去重
-            back = back.filter((item, index, arr) => {
-                return (
-                    arr.findIndex((item2) => {
-                        return item2.user_id == item.user_id
-                    }) == index
-                )
-            })
-            back.forEach((item) => {
-                // 去消息列表里找一下它
-                const user = contactStore.userList.find((user) => {
-                    return user.user_id == item.user_id || user.group_id == item.user_id
-                })
-                if (user) {
-                    contactStore.baseOnMsgList.set(Number(item.user_id), user)
-                    updateLastestHistory(user)
-                }
-            })
-            if (back.length > 0) {
-                scheduleRecentHistoryBootstrap(back)
-            } else {
-                scheduleRecentHistoryBootstrap(contactStore.userList, true)
-            }
-        }
-    },
 
     /**
      * 表情回应后处理
@@ -1599,39 +1417,13 @@ function saveUser(msg: { [key: string]: any }, type: string) {
     const contactStore = useContactStore()
     const settingsStore = useSettingsStore()
     listLoadTimes++
-    let list: any[] | undefined
-    if (msgPath.user_list)
-        list = getMsgData('user_list', msg, msgPath.user_list)
-    else {
-        switch (type) {
-            case 'friend':
-                list = getMsgData('friend_list', msg, msgPath.friend_list)
-                if (list)
-                    // 根据 user_id 去重
-                    list = list.filter((item, index, arr) => {
-                        return (
-                            arr.findIndex((item2) => {
-                                return item2.user_id == item.user_id
-                            }) == index
-                        )
-                    })
-                break
-            case 'group':
-                list = getMsgData('group_list', msg, msgPath.group_list)
-                if (list)
-                    // 根据 group_id 去重
-                    list = list.filter((item, index, arr) => {
-                        return (
-                            arr.findIndex((item2) => {
-                                return item2.group_id == item.group_id
-                            }) == index
-                        )
-                    })
-                break
-        }
+    let list = getMsgData('user_list', msg, msgPath.user_list) as any[] | undefined
+    if (list) {
+        const idKey = type === 'group' ? 'group_id' : 'user_id'
+        list = list.filter((item, index, items) =>
+            items.findIndex((candidate) => candidate[idKey] == item[idKey]) === index)
     }
     if (list != undefined) {
-        const groupNames = {} as { [key: number]: string }
         list.forEach((item, index) => {
             if (item.group_name == null || item.group_name == undefined) {
                 item.group_name = ''
@@ -1640,35 +1432,13 @@ function saveUser(msg: { [key: string]: any }, type: string) {
                 list[index].py_name = { main: [], short: [] }
                 list[index].py_start = ' '
             }
-            // 构建分类
             if (type == 'friend') {
-                if (item.class_id != undefined && item.class_name) {
-                    if (typeof item.class_name == 'string') {
-                        groupNames[item.class_id] = item.class_name
-                    } else {
-                        groupNames[item.class_id] = item.class_name[0]
-                    }
-                }
                 delete item.group_name
             } else {
                 delete item.class_id
                 delete item.class_name
             }
         })
-        if (Object.keys(groupNames).length > 0) {
-            // 把 groupNames 处理为 { class_id: number, class_name: string }[]
-            const groupNamesList = [] as {
-                class_id: number
-                class_name: string
-            }[]
-            for (const key in groupNames) {
-                groupNamesList.push({
-                    class_id: Number(key),
-                    class_name: groupNames[key],
-                })
-            }
-            saveClassInfo(groupNamesList)
-        }
         if (isPinyinReady()) {
             buildPinyinForContacts(list)
         } else {
@@ -1741,52 +1511,9 @@ function saveUser(msg: { [key: string]: any }, type: string) {
     }
     // 如果获取次数大于 0 并且是双数，刷新一下历史会话
     if (listLoadTimes > 0 && listLoadTimes % 2 == 0) {
-        // 获取最近的会话
-        if (authStore.jsonMap?.recent_contact)
-            Connector.send(
-                authStore.jsonMap.recent_contact.name,
-                {},
-                'getRecentContact',
-            )
-        // 根据本地保存的会话重建会话列表（服务端 get_recent_contact 恒空时的兜底），
-        // 并从服务端拉取每个会话的最新一条消息立即刷新
-        restoreLocalSessions()
-        void restoreDatabaseSessions()
-        if (authStore.jsonMap?.recent_contact) {
-            scheduleRecentHistoryBootstrap()
-        } else {
-            // SnowLuma/Lagrange 没有可用的最近会话接口：先以每个联系人 1 条消息探测活跃度。
-            scheduleRecentHistoryBootstrap(contactStore.userList, true)
-        }
+        // SnowLuma 的 get_recent_contact 恒空；SQLite 是唯一会话恢复来源。
+        void restoreDatabaseSessions().then(() => scheduleRecentHistoryBootstrap())
     }
-    // 如果是分离式的好友列表，继续获取分类信息
-    if (type == 'friend' && authStore.jsonMap?.friend_category) {
-        Connector.send(
-            authStore.jsonMap.friend_category.name,
-            {},
-            'getFriendCategory',
-        )
-    }
-}
-
-function saveClassInfo(
-    list: { class_id: number; class_name: string; sort_id?: number }[],
-) {
-    const settingsStore = useSettingsStore()
-    if (list[0].sort_id != undefined) {
-        // 如果有 sort_id，按 sort_id 排序，从小到大
-        list.sort((a, b) => {
-            if (a.sort_id && b.sort_id) return a.sort_id - b.sort_id
-            else return 0
-        })
-    } else {
-        // 按 class_id 排序
-        list.sort((a, b) => {
-            return a.class_id - b.class_id
-        })
-    }
-
-    settingsStore.classes = list
 }
 
 async function saveMsg(msg: any, append = undefined as undefined | string) {
@@ -1836,13 +1563,6 @@ async function saveMsg(msg: any, append = undefined as undefined | string) {
 
         // 保存到本地历史
         saveMessagesWithSideEffects(authStore.loginInfo.uin, list)
-        // 如果分页不是增量的，就不使用追加
-        if (
-            append == 'top' &&
-            authStore.jsonMap.message_list?.pagerType == 'full'
-        ) {
-            append = undefined
-        }
         // 追加处理
         if (append != undefined) {
             // 没有更旧的消息能加载了，禁用允许加载标志
@@ -1935,10 +1655,6 @@ export async function normalizeMessagesForPreview(payload: any): Promise<any[]> 
         map.message_value,
     )
     if (list.length === 0) return []
-
-    if (map.message_list.order === 'reverse') {
-        list.reverse()
-    }
 
     list.forEach((item: any) => {
         if (!item.post_type) {
@@ -2118,10 +1834,6 @@ export async function getMessageList(list: any[] | undefined) {
         msgPath.message_list.type,
         msgPath.message_value,
     )
-    // 倒序处理
-    if (msgPath.message_list.order === 'reverse') {
-        list.reverse()
-    }
     // 检查必要字段
     list.forEach((item: any) => {
         if (!item.post_type) {
@@ -2493,7 +2205,6 @@ export function resetRimtime(resetAll = false) {
     heartbeatIntervalSeconds = -1
     clearMetaEventWatchdog()
     recentHistoryRequested.clear()
-    recentHistoryProbed.clear()
     databaseSessionsRestoredFor = ''
     if (resetAll) {
         // Reset auth store

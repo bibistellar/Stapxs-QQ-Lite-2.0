@@ -133,23 +133,15 @@ export function loadHistoryMessage(
     count = 20,
     echo = 'getChatHistoryFist',
 ) {
-    const authStore = useAuthStore()
-    const chatStore = useChatStore()
-    let name: string
-    const fullPage = authStore.jsonMap.message_list?.pagerType == 'full'
-    if (authStore.jsonMap.message_list && type != 'group') {
-        name = authStore.jsonMap.message_list.private_name
-    } else {
-        name = authStore.jsonMap.message_list.name
-    }
+    const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
 
     Connector.send(
-        name ?? 'get_chat_history',
+        name,
         {
             group_id: type == 'group' ? id : undefined,
             user_id: type != 'group' ? id : undefined,
             message_id: 0,
-            count: fullPage ? chatStore.messageList.length + count : count,
+            count,
         },
         echo,
     )
@@ -162,23 +154,10 @@ export function loadHistoryMessage(
 export function reloadUsers() {
     // 加载用户列表
     if (login.status) {
-        const authStore = useAuthStore()
         const contactStore = useContactStore()
         contactStore.userList = []
-        let friendName = 'get_friend_list'
-        let groupName = 'get_group_list'
-        if (authStore.jsonMap?.user_list?.name) {
-            friendName = authStore.jsonMap.user_list.name.split('|')[0]
-            groupName = authStore.jsonMap.user_list.name.split('|')[1]
-        } else if (
-            authStore.jsonMap?.friend_list?.name &&
-            authStore.jsonMap?.group_list?.name
-        ) {
-            friendName = authStore.jsonMap.friend_list.name
-            groupName = authStore.jsonMap.group_list.name
-        }
-        Connector.send(friendName, {}, 'getFriendList')
-        Connector.send(groupName, {}, 'getGroupList')
+        Connector.send('get_friend_list', {}, 'getFriendList')
+        Connector.send('get_group_list', {}, 'getGroupList')
     }
 }
 
@@ -950,69 +929,6 @@ export function BackendRequest(type: 'GET' | 'POST', url: string,
         cookies: JSON.stringify(cookies),
         data: data,
     })
-}
-
-// 未知实现（如自研的 OneBot 服务端）回退使用的映射表，需与 msg.ts 里的默认映射表保持一致
-const DEFAULT_JSON_MAP = 'Lagrange.OneBot.yaml'
-
-/**
-* 加载数据解析映射表（JSON Path）
-* @param name 配置名称
-* @returns 映射表
-*/
-export function loadJsonMap(name: string) {
-    let msgPath = undefined as { [key: string]: any } | undefined
-    if (name !== undefined) {
-        try {
-            const msgPathList = import.meta.glob(
-                '@renderer/assets/pathMap/*.yaml', { eager: true })
-            const msgPathKey = Object.keys(msgPathList).find((key) => {
-                return key.includes(name)
-            })
-            if (msgPathKey) {
-                msgPath = (msgPathList[msgPathKey] as any).default
-            }
-            if (msgPath) {
-                logger.system('开发者，请稍等一下（翻找），正在为阁下加载 ' + msgPath.name + ' 的服务映射表。')
-                if (msgPath.redirect) {
-                    // eslint-disable-next-line
-                    const newMsgPathKey = Object.keys(msgPathList).find((key) => {
-                        return key.includes(msgPath?.redirect)
-                    })
-                    let newMsgPath = undefined as
-                        { [key: string]: any } | undefined
-                    if (newMsgPathKey) {
-                        newMsgPath = (msgPathList[newMsgPathKey] as any).default
-                    }
-                    // 合并映射表
-                    Object.keys(msgPath).forEach((key) => {
-                        if (newMsgPath && key != 'name' && newMsgPath[key]) {
-                            if (msgPath)
-                                newMsgPath[key] = msgPath[key]
-                        }
-                    })
-                    msgPath = newMsgPath
-                    logger.system('非常抱歉开发者，已帮阁下将映射表重定向加载为 ：' + msgPath?.name + ' （慌张）')
-                }
-            } else {
-                // 没有对应实现的映射表时回退到默认映射表
-                // PS：不能让 jsonMap 保持 undefined，否则读取它的地方（如 reloadUsers）会直接抛错，
-                //     表现为登录成功但用户列表一直是空的
-                logger.system('开发者，没有找到你需要的映射表……将使用默认映射表。')
-                const defaultKey = Object.keys(msgPathList).find((key) => {
-                    return key.includes(DEFAULT_JSON_MAP)
-                })
-                if (defaultKey) {
-                    msgPath = (msgPathList[defaultKey] as any).default
-                }
-            }
-            const authStore = useAuthStore()
-            authStore.jsonMap = msgPath ?? {}
-        } catch (ex) {
-            logger.system('很抱歉开发者，映射表加载失败 ……' + ex)
-        }
-    }
-    return msgPath
 }
 
 /**

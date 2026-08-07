@@ -199,11 +199,11 @@
         UserGroupElem,
     } from '@renderer/function/elements/information'
     import { getRaw as getOpt, run as runOpt } from '@renderer/function/option'
-    import { changeGroupNotice, loadHistoryMessage } from '@renderer/function/utils/appUtil'
+    import { changeGroupNotice } from '@renderer/function/utils/appUtil'
     import { PopInfo, PopType } from '@renderer/function/base'
     import { MenuStatue } from 'vue3-bcui/packages/dist/types'
     import { library } from '@fortawesome/fontawesome-svg-core'
-    import { login as loginInfo } from '@renderer/function/connect'
+    import { Connector, login as loginInfo } from '@renderer/function/connect'
     import { canGroupNotice, getShowName } from '@renderer/function/utils/msgUtil'
 
     import {
@@ -371,9 +371,19 @@
             item.highlight = undefined
             contactStore.baseOnMsgList.set(id, item)
         }
-        // 标记消息已读
-        const type = data.group_id ? 'group' : 'user'
-        loadHistoryMessage(id, type, 1, 'readMemberMessage')
+        // SnowLuma 可以直接按最近一条消息 ID 标记已读，无需先请求一遍历史。
+        if (item?.message_id != null) {
+            const isGroup = data.group_id != null
+            Connector.send(
+                isGroup ? 'mark_group_msg_as_read' : 'mark_private_msg_as_read',
+                {
+                    message_id: item.message_id,
+                    group_id: isGroup ? id : undefined,
+                    user_id: isGroup ? undefined : id,
+                },
+                'setMessageRead',
+            )
+        }
         // pop
         new PopInfo().add(
             PopType.INFO,

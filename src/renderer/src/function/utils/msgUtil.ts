@@ -514,145 +514,26 @@ export function sendMsgRaw(
         }
     }
     if (msg !== undefined && msg.length > 0) {
-        if (authStore.jsonMap.name === 'Lagrange.OneBot') {
-            lgrSendMsg(id, msg, type, echo + '_uuid_' + msgUUID)
-            sendStatEvent('send_msg', { type: type })
-            return
-        }
-        switch (type) {
-            case 'group':
-                Connector.send(
-                    authStore.jsonMap.message_list.name_group_send ??
-                    'send_msg',
-                    { group_id: id, message: msg },
-                    echo + '_uuid_' + msgUUID,
-                )
-                break
-            case 'user': {
-                if (String(id).indexOf('/') > 1) {
-                    Connector.send(
-                        authStore.jsonMap.message_list.name_temp_send ??
-                        'send_temp_msg',
-                        {
-                            user_id: id.split('/')[0],
-                            group_id: id.split('/')[1],
-                            message: msg,
-                        },
-                        echo + '_uuid_' + msgUUID,
-                    )
-                } else {
-                    Connector.send(
-                        authStore.jsonMap.message_list.name_user_send ??
-                        'send_msg',
-                        { user_id: id, message: msg },
-                        echo + '_uuid_' + msgUUID,
-                    )
-                }
-                break
-            }
-        }
+        sendSnowLumaMessage(id, msg, type, echo + '_uuid_' + msgUUID)
         sendStatEvent('send_msg', { type: type })
     }
 }
 
 export function updateLastestHistory(item: UserFriendElem & UserGroupElem) {
-    const authStore = useAuthStore()
     // 发起获取历史消息请求
     const type = item.user_id ? 'user' : 'group'
     const id = item.user_id ? item.user_id : item.group_id
-    let name
-    if (authStore.jsonMap.message_list && type != 'group') {
-        name = authStore.jsonMap.message_list.private_name
-    } else {
-        name = authStore.jsonMap.message_list.name
-    }
+    const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
     Connector.send(
-        name ?? 'get_chat_history',
+        name,
         {
-            message_type: authStore.jsonMap.message_list.message_type[type],
-            group_id: id,
-            user_id: id,
-            message_seq: 0,
+            group_id: type === 'group' ? id : undefined,
+            user_id: type !== 'group' ? id : undefined,
             message_id: 0,
             count: 1,
         },
         'getChatHistoryOnMsg_' + id,
     )
-}
-
-// 本地会话持久化 =====================================================
-// PS：SnowLuma 等服务端的 get_recent_contact 恒返回空数组，导致每次启动 / 重连后
-//     会话列表整个丢失。这里把「已经出现在会话列表里的会话」按账号存到本地，下次
-//     启动或重连后据此把会话塞回列表，并从服务端拉取每个会话最新一条消息立即刷新。
-const LOCAL_SESSION_LIMIT = 200
-let saveLocalSessionsTimer: number | undefined = undefined
-
-function readLocalSessionStore(): { [uin: string]: number[] } {
-    const raw = option.get('local_sessions')
-    if (raw && typeof raw === 'object') {
-        return raw as { [uin: string]: number[] }
-    }
-    if (typeof raw === 'string') {
-        try {
-            const parsed = JSON.parse(raw)
-            if (parsed && typeof parsed === 'object') return parsed
-        } catch {
-            // ignore
-        }
-    }
-    return {}
-}
-
-/**
- * 把当前会话列表（baseOnMsgList 的键）持久化到本地，按账号区分
- */
-export function saveLocalSessions() {
-    const contactStore = useContactStore()
-    const authStore = useAuthStore()
-    const uin = authStore.loginInfo?.uin
-    if (uin == undefined) return
-    const ids = [...contactStore.baseOnMsgList.keys()]
-        .filter((id) => Number.isFinite(id) && id > 0)
-        .slice(0, LOCAL_SESSION_LIMIT)
-    const store = readLocalSessionStore()
-    store[String(uin)] = ids
-    option.save('local_sessions', JSON.stringify(store))
-}
-
-/**
- * 去抖保存，避免每条消息都写一次本地存储
- */
-export function scheduleSaveLocalSessions() {
-    if (saveLocalSessionsTimer) return
-    saveLocalSessionsTimer = window.setTimeout(() => {
-        saveLocalSessionsTimer = undefined
-        saveLocalSessions()
-    }, 2000)
-}
-
-/**
- * 启动 / 重连后：根据本地保存的会话，把会话塞回列表并拉取最新一条消息
- * PS：与 get_recent_contact 的回调走同一套「找用户 → set → 拉最新」逻辑，靠
- *     baseOnMsgList 去重，因此对返回了真实最近会话的服务端不会产生重复。
- */
-export function restoreLocalSessions() {
-    const contactStore = useContactStore()
-    const authStore = useAuthStore()
-    const uin = authStore.loginInfo?.uin
-    if (uin == undefined) return
-    const ids = readLocalSessionStore()[String(uin)]
-    if (!Array.isArray(ids)) return
-    ids.forEach((rawId) => {
-        const id = Number(rawId)
-        if (!Number.isFinite(id) || id <= 0) return
-        if (contactStore.baseOnMsgList.get(id) != undefined) return
-        const user = contactStore.userList.find((item) =>
-            Number(item.user_id) === id || Number(item.group_id) === id)
-        if (user) {
-            contactStore.baseOnMsgList.set(id, user)
-            updateLastestHistory(user)
-        }
-    })
 }
 
 function getSessionId(item: UserFriendElem & UserGroupElem) {
@@ -735,8 +616,6 @@ export function updateBaseOnMsgList() {
     contactStore.onMsgList = onMsgList
     contactStore.groupAssistList = groupAssistList
 
-    // 会话列表有变化，去抖持久化到本地，供下次启动 / 重连时重建
-    scheduleSaveLocalSessions()
 }
 
 /**
@@ -1015,10 +894,14 @@ export function getDifferencesWithRanges(a: string, b: string) {
 }
 
 /**
- * lgr专用发送消息，懒得写了，不做通用适配，胡乱应付下吧
+ * 按 SnowLuma 的 OneBot v11 action 发送普通消息或合并转发。
  * @param msg 消息内容
  */
-function lgrSendMsg(id: string, msg: any, type: string, cb: string) {
+function sendSnowLumaMessage(id: string, msg: any, type: string, cb: string) {
+    const [rawUserId, rawSourceGroupId] = String(id).split('/')
+    const targetId = Number(rawUserId)
+    const sourceGroupId = rawSourceGroupId ? Number(rawSourceGroupId) : undefined
+
     if (msg[0].type === 'node') {
         const sendMsgs = [] as any[]
         msg.forEach((item) => {
@@ -1042,33 +925,37 @@ function lgrSendMsg(id: string, msg: any, type: string, cb: string) {
         if (type === 'group') {
             Connector.send(
                 'send_group_forward_msg',
-                { group_id: id, messages: sendMsgs },
+                { group_id: targetId, messages: sendMsgs },
                 cb,
             )
         } else if (type === 'user') {
             Connector.send(
                 'send_private_forward_msg',
-                { user_id: id, messages: sendMsgs },
+                { user_id: targetId, messages: sendMsgs },
                 cb,
             )
         } else {
-            new PopInfo().add(PopType.ERR, 'lgr不支持匿名聊天')
+            new PopInfo().add(PopType.ERR, 'SnowLuma 不支持此会话类型')
         }
     } else {
         if (type === 'group') {
             Connector.send(
                 'send_group_msg',
-                { group_id: id, message: msg },
+                { group_id: targetId, message: msg },
                 cb,
             )
         } else if (type === 'user') {
             Connector.send(
                 'send_private_msg',
-                { user_id: id, message: msg },
+                {
+                    user_id: targetId,
+                    group_id: sourceGroupId,
+                    message: msg,
+                },
                 cb,
             )
         } else {
-            new PopInfo().add(PopType.ERR, 'lgr不支持匿名聊天')
+            new PopInfo().add(PopType.ERR, 'SnowLuma 不支持此会话类型')
         }
     }
 }
