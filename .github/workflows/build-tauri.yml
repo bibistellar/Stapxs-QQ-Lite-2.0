@@ -14,7 +14,6 @@ jobs:
         env:
             TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-            TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
         strategy:
             # 单个平台失败不影响其它平台继续构建、发布
             fail-fast: false
@@ -60,7 +59,7 @@ jobs:
                   override: true
 
             - name: 检查更新签名配置
-              run: node -e "if (!process.env.TAURI_SIGNING_PRIVATE_KEY || !process.env.TAURI_UPDATER_PUBLIC_KEY) throw new Error('请配置 TAURI_SIGNING_PRIVATE_KEY Secret 和 TAURI_UPDATER_PUBLIC_KEY Variable')"
+              run: node -e "if (!process.env.TAURI_SIGNING_PRIVATE_KEY) throw new Error('请配置 TAURI_SIGNING_PRIVATE_KEY Secret')"
 
             # Apple Silicon 运行器上同时准备两个目标，用于交叉编译 Intel 版
             - name: 添加 macOS 构建目标

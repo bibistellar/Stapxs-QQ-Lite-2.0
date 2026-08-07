@@ -4,19 +4,9 @@
 
 ## 首次配置
 
-在仓库之外的安全目录生成一次密钥：
+当前客户端验签公钥已经固化在 `src/tauri/tauri.conf.json`。对应的无密码私钥只保存在 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 中；GitHub UI 和 API 无法读回原值，发布工作流只在打包进程环境中使用它。应通过分支保护限制对发布工作流的修改权限。
 
-```bash
-yarn tauri signer generate -w /安全目录/stapxs-updater.key
-```
-
-将生成结果配置到 GitHub 仓库：
-
-- Actions Secret `TAURI_SIGNING_PRIVATE_KEY`：私钥文件的完整内容。
-- Actions Secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：生成私钥时设置的密码；无密码时可不配置。
-- Actions Variable `TAURI_UPDATER_PUBLIC_KEY`：命令输出的公钥。
-
-私钥和密码不得提交到仓库。应离线备份私钥；私钥丢失后，已安装的客户端无法验证由新密钥签出的后续更新。
+私钥不得提交到仓库。GitHub Secret 写入后无法读取，只能覆盖或删除；仓库或 Secret 丢失后，已安装客户端将无法验证使用新密钥签出的更新。如需容灾，应将私钥额外保存到受控的云端加密保险库。
 
 ## 发布版本
 
