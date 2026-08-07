@@ -38,19 +38,7 @@
                 </div>
             </div>
         </div>
-        <div v-if="backend.isMobile()" class="ss-card">
-            <header>{{ $t('图标') }}</header>
-            <div class="icon-list">
-                <div v-for="item in getIconList()"
-                    :key="item.name"
-                    :class="item.name === usedIcon ? 'selected' : ''"
-                    @click="changeIcon(item.name)">
-                    <img :src="item.icon">
-                    <span>{{ $t(item.name != '' ? item.name : '默认') }}</span>
-                </div>
-            </div>
-        </div>
-        <div v-if=" !napcat" class="ss-card">
+        <div class="ss-card">
             <header>{{ $t('主题与颜色') }}</header>
             <template v-if="settingsStore.sysConfig.opt_auto_gtk != true">
                 <div id="opt_view_dark" class="opt-item">
@@ -364,67 +352,6 @@
                     </div>
                 </label>
             </div>
-            <div v-if="isMobile() && !backend.isMobile()"
-                class="opt-item">
-                <div :class="checkDefault('initial_scale')" />
-                <font-awesome-icon :icon="['fas', 'up-down-left-right']" />
-                <div>
-                    <label for="opt-view-initial-scale">{{ $t('缩放比例') }}</label>
-                    <span>{{ $t('调整页面在移动端的缩放比例') }}</span>
-                </div>
-                <div class="ss-range">
-                    <input id="opt-view-initial-scale" v-model="settingsStore.sysConfig.initial_scale"
-                        :style="{ 'background-size': `${(initialScaleShow - 0.5) / 0.01}% 100%` }"
-                        type="range"
-                        min="0.5"
-                        max="1.5"
-                        step="0.01"
-                        name="initial_scale"
-                        @change="scaleSave"
-                        @input="setInitialScaleShow">
-                    <span :style="{ 'color': `var(--color-font${initialScaleShow / 0.05 })` }">
-                        {{ initialScaleShow }}</span>
-                </div>
-            </div>
-            <div
-                v-if="isMobile() && !backend.isMobile()"
-                class="opt-item">
-                <div :class="checkDefault('fs_adaptation')" />
-                <font-awesome-icon :icon="['fas', 'border-top-left']" />
-                <div>
-                    <label for="opt-view-fs-adaptation">{{ $t('圆角适配') }}</label>
-                    <span>{{ $t('适配全面屏设备防止四角出界') }}</span>
-                </div>
-                <div class="ss-range">
-                    <input id="opt-view-fs-adaptation" v-model="settingsStore.sysConfig.fs_adaptation"
-                        :style="{ 'background-size': `${(fsAdaptationShow / 50) * 100}% 100%` }"
-                        type="range"
-                        min="0"
-                        max="50"
-                        step="10"
-                        name="fs_adaptation"
-                        @change="save"
-                        @input="setFsAdaptationShow">
-                    <span :style="{ 'color': `var(--color-font${fsAdaptationShow / 50 > 0.5 ? '-r' : ''})` }">
-                        {{ fsAdaptationShow }} px
-                    </span>
-                </div>
-            </div>
-            <div v-if="backend.type == 'web' && !napcat" class="opt-item">
-                <div :class="checkDefault('use_favicon_notice')" />
-                <font-awesome-icon :icon="['fas', 'bell']" />
-                <div>
-                    <label for="opt-view-favicon-notice">{{ $t('在图标上显示通知') }}</label>
-                    <span>{{ $t('呜呜呜——图标都被遮挡的看不到了！') }}</span>
-                </div>
-                <label class="ss-switch">
-                    <input id="opt-view-favicon-notice" v-model="settingsStore.sysConfig.use_favicon_notice"
-                        type="checkbox" name="use_favicon_notice" @change="save">
-                    <div>
-                        <div />
-                    </div>
-                </label>
-            </div>
             <div class="opt-item">
                 <font-awesome-icon :icon="['fas', 'arrows-rotate']" />
                 <div>
@@ -444,10 +371,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, toRaw, onMounted, useTemplateRef } from 'vue'
+import { ref, useTemplateRef } from 'vue'
 import Option, { runASWEvent as save, checkDefault, runAS } from '../../function/option'
 import { BrowserInfo, detect } from 'detect-browser'
-import { getDeviceType } from '@renderer/function/utils/systemUtil'
 
 import languages from '../../assets/l10n/_l10nconfig.json'
 import { sendIdentifyData } from '@renderer/function/utils/appUtil'
@@ -463,7 +389,6 @@ defineOptions({ name: 'ViewOptTheme' })
 
 const $t = i18n.global.t
 
-const napcat = import.meta.env.VITE_NAPCAT
 const colors = [
     '林槐蓝',
     '墨竹青',
@@ -474,37 +399,9 @@ const colors = [
 ]
 const browser = detect() as BrowserInfo
 
-const initialScaleShow = ref(0.5)
-const fsAdaptationShow = ref(0)
-const usedIcon = ref('')
-const themeColorRaw = ref('')
+const themeColorRaw = ref('#' + ('000000' + Number((settingsStore.sysConfig.theme_color || 0)).toString(16)).slice(-6))
 
 const choiceImgRef = useTemplateRef<HTMLInputElement>('choiceImgRef')
-
-onMounted(() => {
-    themeColorRaw.value = '#' + ('000000' + Number((settingsStore.sysConfig.theme_color || 0)).toString(16)).slice(-6)
-    // 一次性初始化一次缩放级别
-    const unwatch = watch(
-        () => settingsStore.sysConfig,
-        () => {
-            initialScaleShow.value = toRaw(
-                settingsStore.sysConfig.initial_scale,
-            )
-            fsAdaptationShow.value = toRaw(
-                settingsStore.sysConfig.fs_adaptation,
-            )
-            unwatch()
-        },
-    )
-    // 获取当前使用的图标
-    const Onebot = (window.Capacitor as any)?.Plugins?.Onebot
-    if (Onebot) {
-        Onebot.addListener('onebot:icon', (data: any) => {
-            usedIcon.value = data.name.replace('AppIcon', '')
-        })
-        Onebot.getUsedIcon()
-    }
-})
 
 function gaLanguage(event: Event) {
     const sender = event.target as HTMLInputElement
@@ -598,67 +495,8 @@ function blurTip(event: Event) {
     }
 }
 
-function scaleSave(event: Event) {
-    save(event)
-    // 5 秒后自动取消防止误操作导致无法恢复
-    const timerId = setTimeout(() => {
-        (event.target as HTMLInputElement).value = '0.85'
-        settingsStore.sysConfig.initial_scale = 0.85
-        initialScaleShow.value = 0.85
-        save(event)
-        uiStore.popBoxList.pop()
-        const popInfo = {
-            svg: 'up-down-left-right',
-            html: '<span>' + $t('缩放比例调整已取消，已恢复默认缩放比例。') + '</span>',
-            title: $t('确认缩放比例'),
-            button: [
-                {
-                    text: $t('取消'),
-                    master: true,
-                    fun: () => {
-                        uiStore.popBoxList.pop()
-                    },
-                }
-            ],
-        }
-        uiStore.popBoxList.push(popInfo)
-    }, 5000)
-    // 保存提醒
-    const popInfo = {
-        svg: 'up-down-left-right',
-        html: '<span>' + $t('点击确认以应用缩放比例，预览将在 5 秒后取消……') + '</span>',
-        title: $t('确认缩放比例'),
-        button: [
-            {
-                text: $t('确定'),
-                fun: () => {
-                    uiStore.popBoxList.pop()
-                    clearTimeout(timerId)
-                },
-            }
-        ],
-    }
-    uiStore.popBoxList.push(popInfo)
-}
-
-function setInitialScaleShow(event: Event) {
-    const sender = event.target as HTMLInputElement
-    initialScaleShow.value = Number(sender.value)
-}
-
-function setFsAdaptationShow(event: Event) {
-    const sender = event.target as HTMLInputElement
-    fsAdaptationShow.value = Number(sender.value)
-}
-
 function restartapp() {
     backend.call(undefined, 'win:relaunch', false)
-}
-
-function isMobile() {
-    return (
-        getDeviceType() === 'Android' || getDeviceType() === 'iOS'
-    )
 }
 
 function getAppendChatView() {
@@ -672,28 +510,6 @@ function getAppendChatView() {
         }
     })
     return chatViewList
-}
-
-function getIconList() {
-    const iconList = import.meta.glob('@renderer/assets/img/icons/*.png', { eager: true })
-    const iconListInfo = [] as { name: string, icon: any }[]
-    Object.keys(iconList).forEach((key: string) => {
-        const name = key.split('/').pop()?.split('.')[0]
-        const iconName = name?.replace('AppIcon', '')
-        if( name && name.indexOf('AppIcon') >= 0 && iconName != undefined) {
-            if(!settingsStore.darkMode && !iconName.endsWith('Dark')) {
-                iconListInfo.push({ name: iconName, icon: (iconList[key] as any).default })
-            } else if(settingsStore.darkMode && iconName.endsWith('Dark')) {
-                iconListInfo.push({ name: iconName.replace('Dark', ''), icon: (iconList[key] as any).default })
-            }
-        }
-    })
-    return iconListInfo
-}
-
-function changeIcon(name: string) {
-    backend.call('Onebot', 'changeIcon', false, { name: name != '' ? (name + 'AppIcon') : name })
-    usedIcon.value = name
 }
 
 /**

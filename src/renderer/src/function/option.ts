@@ -92,8 +92,6 @@ export const optDefault: { [key: string]: any } = {
     opt_fast_animation: false,
     chat_more_blur: false,
     glass_effect: false,
-    initial_scale: 0.85,
-    fs_adaptation: 0,
     opt_always_top: false,
     opt_revolve: false,
     use_favicon_notice: true,
@@ -114,11 +112,10 @@ export const optDefault: { [key: string]: any } = {
     close_ga: false,
     open_ga_bot: true,
     record_recent_emoji: '100times' as 'none' | 'order' | '100times' | '500times',
-    // Tauri 默认启用本地消息缓存，并采用“本地即时显示 + OneBot 网络校准”。
-    enable_local_history: true,
+    // 本地消息数据库始终启用，加载策略仍可单独配置。
     mixed_load_messages: true,
-    local_history_cache_migrated: false,
     disable_local_history_image_cache: false,
+    auto_check_update: true,
     // Dev
     msg_type: 2,
     log_level: 'err',
@@ -148,7 +145,6 @@ const configFunction: { [key: string]: (value: any) => void } = {
     opt_auto_dark: setAutoDark,
     theme_color: changeTheme,
     chatview_name: changeChatView,
-    initial_scale: changeInitialScale,
     msg_type: setMsgType,
     opt_auto_win_color: updateWinColorOpt,
     opt_revolve: viewRevolve,
@@ -159,7 +155,6 @@ const configFunction: { [key: string]: (value: any) => void } = {
     use_favicon_notice: setFaviconNotice,
     custom_css: injectCustomCss,
     opt_ind_message: updateChatPan,
-    enable_local_history: setLocalHistoryEnabled,
 }
 
 // =============== 附加设置注册接口 ===============
@@ -239,12 +234,6 @@ function updateChatPan() {
     uiStore.openSideBar = true
 }
 
-function setLocalHistoryEnabled(value: boolean) {
-    if (backend.type !== 'tauri') return
-    backend.call(undefined, 'db:setEnabled', false, { enabled: value })
-}
-
-
 function setFaviconNotice(_: boolean) {
     refreshFavicon()
 }
@@ -318,21 +307,6 @@ function setMsgType(value: any) {
     if (value) {
         const uiStore = useUIStore()
         uiStore.msgType = Number(value)
-    }
-}
-
-/**
- * 修改移动端缩放比例
- * @param value 数值（0.5 - 1.5）
- */
-function changeInitialScale(value: number) {
-    const viewport = document.getElementById('viewport')
-    if (viewport && value && value >= 0.5 && value <= 1.5) {
-        (viewport as any).content =
-            `width=device-width, initial-scale=${value}, maximum-scale=5, user-scalable=0`
-    } else {
-        (viewport as any).content =
-            'width=device-width, initial-scale=0.85, maximum-scale=5, user-scalable=0'
     }
 }
 
@@ -494,14 +468,6 @@ function changeColorMode(mode: string) {
     }
     // 记录
     settingsStore.darkMode = mode === 'dark'
-    // Capacitor: 状态栏颜色（Android）
-    if(backend.isMobile()) {
-        backend.call('StatusBar', 'setStyle', false, { style: mode.toUpperCase() })
-    }
-    // Capacitor: VConsole 颜色
-    if(backend.function && 'vConsole' in backend.function && backend.function.vConsole) {
-        backend.function.vConsole.setOption('theme', mode)
-    }
     // 刷新图标
     refreshFavicon()
 }
@@ -553,41 +519,23 @@ function changeChatView(name: string | undefined) {
 // =============== 设置基础功能 ===============
 
 /**
- * 读取并序列化 localStorage 中的设置项（electron 读取 electron-store 存储）
+ * 从 Tauri Store 读取并序列化设置项。
  * @returns 设置项集合
  */
 export async function load(): Promise<{ [key: string]: any }> {
     let data = {} as { [key: string]: any }
 
-    if ('electron' == backend.type) {
-        data = backend.callSync('opt:getAll')
-    } else if('tauri' == backend.type) {
-        data = await backend.call(undefined, 'opt:getAll', true)
-        // 处理下 json 字符串
-        Object.keys(data).forEach((key) => {
-            const value = data[key]
-            if (typeof value == 'string') {
-                try {
-                    data[key] = JSON.parse(value)
-                } catch (e: unknown) {
-                    // ignore
-                }
-            }
-        })
-    } else {
-        const str = localStorage.getItem('options')
-        if (str != null) {
-            const list = str.split('&')
-            for (let i = 0; i <= list.length; i++) {
-                if (list[i] !== undefined) {
-                    const opt: string[] = list[i].split(':')
-                    if (opt.length === 2) {
-                        data[opt[0]] = opt[1]
-                    }
-                }
+    data = await backend.call(undefined, 'opt:getAll', true) ?? {}
+    Object.keys(data).forEach((key) => {
+        const value = data[key]
+        if (typeof value == 'string') {
+            try {
+                data[key] = JSON.parse(value)
+            } catch (e: unknown) {
+                // 保留普通字符串
             }
         }
-    }
+    })
     return loadOptData(data)
 }
 
@@ -621,6 +569,13 @@ function loadOptData(data: { [key: string]: any }) {
         run(key, options[key])
     })
     let optChanged = false
+    // 本地数据库已改为强制启用，清理旧版本遗留的开关和迁移标记。
+    for (const obsoleteKey of ['enable_local_history', 'local_history_cache_migrated']) {
+        if (Object.prototype.hasOwnProperty.call(options, obsoleteKey)) {
+            delete options[obsoleteKey]
+            optChanged = true
+        }
+    }
     // 初始化不存在的需要进行初始化的值
     Object.keys(optDefault).forEach((key) => {
         if (options[key] === undefined) {
@@ -628,15 +583,6 @@ function loadOptData(data: { [key: string]: any }) {
             options[key] = optDefault[key]
         }
     })
-    // 旧版本默认关闭缓存。升级时仅迁移一次，之后尊重用户手动修改的开关。
-    if (options.local_history_cache_migrated !== true) {
-        optChanged = true
-        options.enable_local_history = true
-        options.mixed_load_messages = true
-        options.local_history_cache_migrated = true
-    }
-    // Tauri 的数据库状态由后端持有；每次加载设置都同步一次，首次安装应用默认值时也生效。
-    setLocalHistoryEnabled(options.enable_local_history === true)
     // 删除不存在的设置项
 	const needless: string[] = []
 	for (const key in options) {
@@ -701,31 +647,9 @@ export function get(name: string): any {
  * @returns 设置项值（如果没有则为 null）
  * @description <strong>注意：</strong>
  * 此方法获取原始设置项值，不会对值进行 T/F 转换、JSON 解析、URL 解码等操作；
- * 在 Web 端和 Capacitor 端使用时由于存储在 WebStorage 中，需要特别注意预防上述未转换导致的错误。
  */
 export function getRaw(name: string) {
-    if ('electron' == backend.type) {
-        return backend.call('opt:get', name, true)
-    } else if('tauri' == backend.type) {
-        return backend.call(undefined, 'opt:get', true, name)
-    } else {
-        // 解析拆分并执行各个设置项的初始化方法
-        const str = localStorage.getItem('options')
-        if (str != null) {
-            const list = str.split('&')
-            for (let i = 0; i <= list.length; i++) {
-                if (list[i] !== undefined) {
-                    const opt: string[] = list[i].split(':')
-                    if (opt.length === 2) {
-                        if (name == opt[0]) {
-                            return Promise.resolve(opt[1])
-                        }
-                    }
-                }
-            }
-        }
-        return Promise.resolve(null)
-    }
+    return backend.call(undefined, 'opt:get', true, name)
 }
 
 /**
@@ -741,30 +665,12 @@ export function saveAll(config = {} as { [key: string]: any }) {
     if (Object.keys(config).length == 0) {
         Object.assign(config, cacheConfigs)
     }
-    let str = ''
+    const saveConfig = config
     Object.keys(config).forEach((key) => {
         const isObject = typeof config[key] == 'object'
-        str +=
-            key +
-            ':' +
-            encodeURIComponent(
-                isObject ? JSON.stringify(config[key]) : config[key],
-            ) +
-            '&'
+        saveConfig[key] = isObject ? JSON.stringify(config[key]): config[key]
     })
-    str = str.substring(0, str.length - 1)
-    localStorage.setItem('options', str)
-
-    // electron：将配置保存
-    if (backend.isDesktop()) {
-        const saveConfig = config
-        Object.keys(config).forEach((key) => {
-            const isObject = typeof config[key] == 'object'
-            saveConfig[key] = isObject ? JSON.stringify(config[key]): config[key]
-        })
-        backend.call(undefined, 'opt:saveAll', false,
-            backend.type == 'tauri' ? { data: saveConfig } : saveConfig)
-    }
+    backend.call(undefined, 'opt:saveAll', false, { data: saveConfig })
 }
 
 /**

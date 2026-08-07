@@ -7,6 +7,18 @@ export function isOneBotHeartbeat(message: { [key: string]: any }) {
         message.meta_event_type === 'heartbeat'
 }
 
+export function parseHeartbeatStatus(status: unknown) {
+    if (typeof status !== 'object' || status === null) {
+        return {} as { online?: boolean, good?: boolean }
+    }
+
+    const value = status as { online?: unknown, good?: unknown }
+    return {
+        online: typeof value.online === 'boolean' ? value.online : undefined,
+        good: typeof value.good === 'boolean' ? value.good : undefined,
+    }
+}
+
 export function getHeartbeatIntervalSeconds(
     reportedInterval: unknown,
     lastReceivedAt: number,

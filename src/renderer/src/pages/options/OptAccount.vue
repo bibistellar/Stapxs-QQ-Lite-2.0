@@ -23,7 +23,7 @@
                             ? authStore.loginInfo.info.lnick : ''
                     }}</span>
                 </div>
-                <font-awesome-icon v-if="!sse && !napcat" :icon="['fas', 'right-from-bracket']" @click="exitConnect" />
+                <font-awesome-icon :icon="['fas', 'right-from-bracket']" @click="exitConnect" />
             </div>
             <div class="ss-card">
                 <header>{{ $t('账号设置') }}</header>
@@ -63,7 +63,7 @@
                 </button>
             </div>
         </template>
-        <div v-if="Object.keys(authStore.botInfo).length > 0 && !napcat"
+        <div v-if="Object.keys(authStore.botInfo).length > 0"
             class="ss-card">
             <header>{{ $t('后端信息') }}</header>
             <div class="l10n-info">
@@ -129,9 +129,6 @@ const $t = i18n.global.t
 const connectionStore = useConnectionStore()
 const authStore = useAuthStore()
 
-const sse = import.meta.env.VITE_APP_SSE_MODE == 'true'
-const napcat = import.meta.env.VITE_NAPCAT
-
 /**
  * 对 botInfo 字段部分需要处理的数据进行处理
  * @param name 键名
@@ -179,7 +176,7 @@ function setNick(event: KeyboardEvent) {
     // TODO: 这玩意的返回好像永远是错误的 …… 所以干脆不处理返回了
     if (event.key === 'Enter' && authStore.loginInfo.nickname !== '') {
         Connector.send(
-            'set_nickname',
+            'set_qq_profile',
             { nickname: authStore.loginInfo.nickname },
             'setNickname',
         )
@@ -194,8 +191,8 @@ function setLNick(event: KeyboardEvent) {
     // TODO: 这玩意的返回好像永远是错误的 …… 所以干脆不处理返回了
     if (event.key === 'Enter' && authStore.loginInfo.info.lnick !== '') {
         Connector.send(
-            'set_signature',
-            { signature: authStore.loginInfo.info.lnick },
+            'set_qq_profile',
+            { personal_note: authStore.loginInfo.info.lnick },
             'setSignature',
         )
     }

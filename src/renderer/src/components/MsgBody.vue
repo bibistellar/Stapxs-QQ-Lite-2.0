@@ -32,9 +32,11 @@
                 :src="'https://q1.qlogo.cn/g?b=qq&s=0&nk=' + data.sender.user_id"
                 :alt="data.sender.card ? data.sender.card : data.sender.nickname"
                 @dblclick="sendPoke">
-            <div v-if="data.fake_msg == true"
-                :class="'sending left' + (isMe ? ' me' : '')">
-                <font-awesome-icon :icon="['fas', 'spinner']" />
+            <div v-if="data.outgoing_state"
+                :class="['sending', 'left', data.outgoing_state, { me: isMe }]"
+                :title="outgoingStateTitle()"
+                @click="retryFailedOutgoing">
+                <font-awesome-icon :icon="['fas', outgoingStateIcon()]" />
             </div>
         </template>
         <div :class="msgBodyClass">
@@ -358,9 +360,11 @@
                 </div>
             </div>
         </div>
-        <div v-if="data.fake_msg == true"
-            :class="'sending right' + (isMe ? ' me' : '')">
-            <font-awesome-icon :icon="['fas', 'spinner']" />
+        <div v-if="data.outgoing_state"
+            :class="['sending', 'right', data.outgoing_state, { me: isMe }]"
+            :title="outgoingStateTitle()"
+            @click="retryFailedOutgoing">
+            <font-awesome-icon :icon="['fas', outgoingStateIcon()]" />
         </div>
         <div v-if="data.emoji_like"
             :class="'emoji-like' + (isMe ? ' me' : '')">
@@ -391,7 +395,7 @@ import { Connector } from '@renderer/function/connect'
 import { useSettingsStore } from '@renderer/state/settings'
 import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
 import { StringifyOptions } from 'querystring'
-import { getMsgRawTxt, pokeAnime } from '@renderer/function/utils/msgUtil'
+import { getMsgRawTxt, pokeAnime, retryOutgoingMessage } from '@renderer/function/utils/msgUtil'
 import {
     isRobot,
     openLink,
@@ -437,6 +441,29 @@ type IUser = any
 defineOptions({ name: 'MsgBody' })
 
 const $t = i18n.global.t
+
+function outgoingStateIcon() {
+    switch (data.outgoing_state) {
+        case 'pending': return 'clock'
+        case 'failed': return 'circle-exclamation'
+        case 'uncertain': return 'triangle-exclamation'
+        default: return 'spinner'
+    }
+}
+
+function outgoingStateTitle() {
+    switch (data.outgoing_state) {
+        case 'pending': return $t('等待连接后发送')
+        case 'sending': return $t('正在发送')
+        case 'failed': return data.outgoing_error || $t('发送失败，点击重试')
+        case 'uncertain': return data.outgoing_error || $t('发送结果未知，不会自动重试')
+        default: return ''
+    }
+}
+
+function retryFailedOutgoing() {
+    if (data.outgoing_state === 'failed') void retryOutgoingMessage(data)
+}
 
 const {
     data,
@@ -666,12 +693,6 @@ function preImgClick(img: string) {
 async function imageLoaded(event: Event) {
     const img = event.target as HTMLImageElement
 
-    if(backend.isMobile() && img.src && !img.src.startsWith('data:')
-        && img.dataset.type === 'image') {
-        img.src = await backend.proxyImageUrl(img.src)
-        return
-    }
-
     const vh = document.documentElement.clientHeight || document.body.clientHeight
     const imgHeight = img.naturalHeight || img.height
     let imgWidth = img.naturalWidth || img.width
@@ -793,20 +814,19 @@ async function parseText(index: number) {
                 }
             }
             if(!linkData) {
-                if (!backend.isWeb()) {
-                    let html = await backend.call('Onebot', 'sys:getHtml', true, finaLink)
-                    if(html) {
-                        const headEnd = html.indexOf('</head>')
-                        html = html.slice(0, headEnd)
-                        const ogRegex = /<meta\s+property="og:([^"]+)"\s+content="([^"]+)"\s*\/?>/g
-                        const ogTags = {} as {[key: string]: string}
-                        let match: string[] | null
-                        while ((match = ogRegex.exec(html)) !== null) {
-                            ogTags[`og:${match[1]}`] = match[2]
-                        }
-                        linkData = ogTags
+                let html = await backend.call(undefined, 'sys:getHtml', true, finaLink)
+                if(html) {
+                    const headEnd = html.indexOf('</head>')
+                    html = html.slice(0, headEnd)
+                    const ogRegex = /<meta\s+property="og:([^"]+)"\s+content="([^"]+)"\s*\/?>/g
+                    const ogTags = {} as {[key: string]: string}
+                    let match: string[] | null
+                    while ((match = ogRegex.exec(html)) !== null) {
+                        ogTags[`og:${match[1]}`] = match[2]
                     }
-                } else {
+                    linkData = ogTags
+                }
+                if (!linkData) {
                     const response = await fetch(`${import.meta.env.VITE_APP_LINK_VIEW}/${encodeURIComponent(fistLink)}`)
                     if(response.ok) {
                         const res = await response.json()

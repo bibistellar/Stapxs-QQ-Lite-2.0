@@ -15,15 +15,13 @@ pub struct DbState(pub Mutex<DbStateInner>);
 
 pub struct DbStateInner {
     pub data_dir: PathBuf,
-    pub enabled: bool,
     pub conn: Option<Connection>,
 }
 
 impl DbState {
-    pub fn new(data_dir: PathBuf, enabled: bool) -> Self {
+    pub fn new(data_dir: PathBuf) -> Self {
         Self(Mutex::new(DbStateInner {
             data_dir,
-            enabled,
             conn: None,
         }))
     }
@@ -33,10 +31,6 @@ impl DbState {
         F: FnOnce(&Connection) -> Result<T, String>,
     {
         let mut inner = self.0.lock().map_err(|e| e.to_string())?;
-
-        if !inner.enabled {
-            return Err("本地历史消息存储未启用".to_string());
-        }
 
         if inner.conn.is_none() {
             let conn = open_db(inner.data_dir.clone()).map_err(|e| e.to_string())?;
@@ -51,19 +45,6 @@ impl DbState {
 
         f(conn)
     }
-}
-
-/// 运行时切换本地历史数据库，无需重启应用。
-/// 关闭时释放连接；再次开启后由下一次读写请求懒加载数据库。
-#[tauri::command]
-pub fn db_set_enabled(state: State<'_, DbState>, enabled: bool) -> Result<(), String> {
-    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
-    inner.enabled = enabled;
-    if !enabled {
-        inner.conn = None;
-    }
-    info!("本地历史消息缓存已{}", if enabled { "启用" } else { "关闭" });
-    Ok(())
 }
 
 // ── 数据结构 ────────────────────────────────────────────────
@@ -91,6 +72,41 @@ pub struct MsgRecord {
     pub raw_message: Option<String>,
     /// 是否已撤回
     pub revoked: bool,
+}
+
+/// 尚未完成服务端确认的发件箱记录。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OutgoingRecord {
+    /// 客户端生成的稳定消息 ID，用于跨重启追踪发送状态。
+    pub client_id: String,
+    pub chat_id: i64,
+    pub chat_type: String,
+    /// 群临时会话的来源群号；普通私聊和群聊为空。
+    pub source_group_id: Option<i64>,
+    pub sender_id: i64,
+    pub sender_name: Option<String>,
+    pub time: i64,
+    /// JSON 序列化的 OneBot 消息段。
+    pub message: String,
+    /// JSON 序列化的原始发送载荷，可能是消息段数组或 CQ 字符串。
+    pub payload: String,
+    pub raw_message: Option<String>,
+    /// pending | sending | failed | uncertain
+    pub state: String,
+    pub server_message_id: Option<String>,
+    pub error: Option<String>,
+    pub retry_count: i64,
+    /// 原始回调名；文件消息等调用方会携带额外元数据。
+    pub echo: String,
+}
+
+/// 备份并移走旧数据库后的结果。
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbRebuildResult {
+    /// 没有旧数据库文件时为空。
+    pub backup_directory: Option<String>,
+    pub moved_files: usize,
 }
 
 /// 获取当前平台的数据库加密密钥。
@@ -162,20 +178,16 @@ pub fn open_db(data_dir: PathBuf) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(&data_dir).ok();
     let db_path = data_dir.join("messages.db");
 
-    open_or_recreate(db_path)
+    open_encrypted_db(db_path)
 }
 
-/// 尝试以加密模式打开数据库；失败直接抛出异常结束
-fn open_or_recreate(db_path: std::path::PathBuf) -> rusqlite::Result<Connection> {
+/// 尝试以加密模式打开数据库；失败返回给调用方，由界面提供重建入口。
+fn open_encrypted_db(db_path: std::path::PathBuf) -> rusqlite::Result<Connection> {
     match try_open_encrypted(&db_path) {
         Ok(conn) => Ok(conn),
         Err(e) => {
-            log::warn!(
-                "无法以加密模式打开 {:?}（{}）",
-                db_path, e
-            );
-            // 直接退出应用
-            std::process::exit(1);
+            error!("无法以加密模式打开 {:?}（{}）", db_path, e);
+            Err(e)
         }
     }
 }
@@ -220,6 +232,47 @@ fn try_open_encrypted(db_path: &std::path::Path) -> rusqlite::Result<Connection>
 
     // 迁移：为旧数据库添加 seq 列（若列已存在则静默忽略）
     let _ = conn.execute_batch("ALTER TABLE messages ADD COLUMN seq INTEGER;");
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS outgoing_messages (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            self_id           TEXT    NOT NULL,
+            client_id         TEXT    NOT NULL,
+            chat_id           INTEGER NOT NULL,
+            chat_type         TEXT    NOT NULL,
+            source_group_id   INTEGER,
+            sender_id         INTEGER NOT NULL,
+            sender_name       TEXT,
+            time              INTEGER NOT NULL,
+            message           TEXT    NOT NULL,
+            payload           TEXT    NOT NULL DEFAULT '[]',
+            raw_message       TEXT,
+            state             TEXT    NOT NULL DEFAULT 'pending',
+            server_message_id TEXT,
+            error             TEXT,
+            retry_count       INTEGER NOT NULL DEFAULT 0,
+            echo              TEXT    NOT NULL DEFAULT 'sendMsgBack',
+            created_at        INTEGER NOT NULL,
+            updated_at        INTEGER NOT NULL,
+            UNIQUE(self_id, client_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_outgoing_messages_state
+            ON outgoing_messages(self_id, state, time, id);
+
+        UPDATE outgoing_messages
+           SET state = 'uncertain',
+               error = COALESCE(error, '客户端在等待发送回执时退出'),
+               updated_at = unixepoch('now') * 1000
+         WHERE state = 'sending';
+        ",
+    )?;
+    let _ = conn.execute_batch(
+        "ALTER TABLE outgoing_messages ADD COLUMN source_group_id INTEGER;",
+    );
+    let _ = conn.execute_batch(
+        "ALTER TABLE outgoing_messages ADD COLUMN payload TEXT NOT NULL DEFAULT '[]';",
+    );
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS images (
@@ -294,6 +347,242 @@ pub fn db_save_messages(
         debug!("成功保存 {} 条消息", saved);
 
         Ok(saved)
+    })
+}
+
+fn valid_outgoing_state(state: &str) -> bool {
+    matches!(state, "pending" | "sending" | "failed" | "uncertain")
+}
+
+/// 关闭当前连接，将数据库及事务日志文件移入带时间戳的备份目录。
+/// 加密密钥文件不会被移动，新数据库继续使用原有设备密钥。
+#[tauri::command]
+pub fn db_rebuild(state: State<DbState>) -> Result<DbRebuildResult, String> {
+    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
+
+    if let Some(conn) = inner.conn.take() {
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        drop(conn);
+    }
+
+    backup_database_files(&inner.data_dir)
+}
+
+fn backup_database_files(data_dir: &std::path::Path) -> Result<DbRebuildResult, String> {
+    let sources = [
+        (data_dir.join("messages.db"), "messages.db"),
+        (data_dir.join("messages.db-wal"), "messages.db-wal"),
+        (data_dir.join("messages.db-shm"), "messages.db-shm"),
+        (data_dir.join("messages.db-journal"), "messages.db-journal"),
+    ];
+    let existing: Vec<_> = sources
+        .into_iter()
+        .filter(|(path, _)| path.exists())
+        .collect();
+
+    if existing.is_empty() {
+        return Ok(DbRebuildResult {
+            backup_directory: None,
+            moved_files: 0,
+        });
+    }
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let base_name = format!("messages-db-backup-{}", timestamp);
+    let mut backup_dir = data_dir.join(&base_name);
+    let mut suffix = 1;
+    while backup_dir.exists() {
+        backup_dir = data_dir.join(format!("{}-{}", base_name, suffix));
+        suffix += 1;
+    }
+    fs::create_dir_all(&backup_dir).map_err(|e| format!("创建数据库备份目录失败：{}", e))?;
+
+    let mut moved = Vec::new();
+    for (source, file_name) in existing {
+        let target = backup_dir.join(file_name);
+        if let Err(e) = fs::rename(&source, &target) {
+            for (moved_source, moved_target) in moved.iter().rev() {
+                let _ = fs::rename(moved_target, moved_source);
+            }
+            let _ = fs::remove_dir(&backup_dir);
+            return Err(format!("备份数据库文件 {:?} 失败：{}", source, e));
+        }
+        moved.push((source, target));
+    }
+
+    info!(
+        "旧 SQLite 数据库已备份至 {:?}（{} 个文件）",
+        backup_dir,
+        moved.len()
+    );
+    Ok(DbRebuildResult {
+        backup_directory: Some(backup_dir.to_string_lossy().into_owned()),
+        moved_files: moved.len(),
+    })
+}
+
+/// 新建或更新一条持久化发件箱记录。
+#[tauri::command]
+pub fn db_save_outgoing(
+    state: State<DbState>,
+    self_id: String,
+    outgoing: OutgoingRecord,
+) -> Result<bool, String> {
+    if !valid_outgoing_state(&outgoing.state) {
+        return Err(format!("未知的发送状态：{}", outgoing.state));
+    }
+
+    state.with_conn(|conn| {
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT INTO outgoing_messages
+                (self_id, client_id, chat_id, chat_type, source_group_id, sender_id, sender_name,
+                 time, message, payload, raw_message, state, server_message_id, error,
+                 retry_count, echo, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)
+             ON CONFLICT(self_id, client_id) DO UPDATE SET
+                 chat_id = excluded.chat_id,
+                 chat_type = excluded.chat_type,
+                 source_group_id = excluded.source_group_id,
+                 sender_id = excluded.sender_id,
+                 sender_name = excluded.sender_name,
+                 time = excluded.time,
+                 message = excluded.message,
+                 payload = excluded.payload,
+                 raw_message = excluded.raw_message,
+                 state = excluded.state,
+                 server_message_id = COALESCE(excluded.server_message_id, outgoing_messages.server_message_id),
+                 error = excluded.error,
+                 retry_count = excluded.retry_count,
+                 echo = excluded.echo,
+                 updated_at = excluded.updated_at",
+            params![
+                self_id,
+                outgoing.client_id,
+                outgoing.chat_id,
+                outgoing.chat_type,
+                outgoing.source_group_id,
+                outgoing.sender_id,
+                outgoing.sender_name,
+                outgoing.time,
+                outgoing.message,
+                outgoing.payload,
+                outgoing.raw_message,
+                outgoing.state,
+                outgoing.server_message_id,
+                outgoing.error,
+                outgoing.retry_count,
+                outgoing.echo,
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(true)
+    })
+}
+
+/// 更新一条发件箱记录的状态。
+#[tauri::command]
+pub fn db_update_outgoing_state(
+    state: State<DbState>,
+    self_id: String,
+    client_id: String,
+    send_state: String,
+    server_message_id: Option<String>,
+    error: Option<String>,
+    increment_retry: Option<bool>,
+) -> Result<bool, String> {
+    if !valid_outgoing_state(&send_state) {
+        return Err(format!("未知的发送状态：{}", send_state));
+    }
+
+    state.with_conn(|conn| {
+        let now = chrono::Utc::now().timestamp_millis();
+        let n = conn.execute(
+            "UPDATE outgoing_messages
+                SET state = ?3,
+                    server_message_id = COALESCE(?4, server_message_id),
+                    error = ?5,
+                    retry_count = retry_count + CASE WHEN ?6 THEN 1 ELSE 0 END,
+                    updated_at = ?7
+              WHERE self_id = ?1 AND client_id = ?2",
+            params![
+                self_id,
+                client_id,
+                send_state,
+                server_message_id,
+                error,
+                increment_retry.unwrap_or(false),
+                now,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(n > 0)
+    })
+}
+
+/// 获取当前账号的发件箱；可按会话和状态过滤。
+#[tauri::command]
+pub fn db_get_outgoing(
+    state: State<DbState>,
+    self_id: String,
+    chat_id: Option<i64>,
+    states: Option<Vec<String>>,
+) -> Result<Vec<OutgoingRecord>, String> {
+    state.with_conn(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT client_id, chat_id, chat_type, source_group_id, sender_id,
+                    sender_name, time, message, payload, raw_message, state,
+                    server_message_id, error, retry_count, echo
+               FROM outgoing_messages
+              WHERE self_id = ?1
+              ORDER BY time ASC, id ASC",
+        ).map_err(|e| e.to_string())?;
+
+        let state_filter = states.unwrap_or_default();
+        let list = stmt
+            .query_map(params![self_id], row_to_outgoing_record)
+            .map_err(|e| e.to_string())?
+            .filter_map(|record| record.ok())
+            .filter(|record| chat_id.is_none_or(|id| record.chat_id == id))
+            .filter(|record| state_filter.is_empty() || state_filter.contains(&record.state))
+            .collect();
+        Ok(list)
+    })
+}
+
+/// 确认消息已保存进正式历史后，从发件箱移除。
+#[tauri::command]
+pub fn db_delete_outgoing(
+    state: State<DbState>,
+    self_id: String,
+    client_id: String,
+) -> Result<bool, String> {
+    state.with_conn(|conn| {
+        let n = conn.execute(
+            "DELETE FROM outgoing_messages WHERE self_id = ?1 AND client_id = ?2",
+            params![self_id, client_id],
+        ).map_err(|e| e.to_string())?;
+        Ok(n > 0)
+    })
+}
+
+/// 链路关闭时，所有等待回执的发送都进入 uncertain，禁止自动重发。
+#[tauri::command]
+pub fn db_mark_sending_uncertain(
+    state: State<DbState>,
+    self_id: String,
+    error: Option<String>,
+) -> Result<usize, String> {
+    state.with_conn(|conn| {
+        let now = chrono::Utc::now().timestamp_millis();
+        let n = conn.execute(
+            "UPDATE outgoing_messages
+                SET state = 'uncertain', error = ?2, updated_at = ?3
+              WHERE self_id = ?1 AND state = 'sending'",
+            params![self_id, error, now],
+        ).map_err(|e| e.to_string())?;
+        Ok(n)
     })
 }
 
@@ -802,4 +1091,61 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<MsgRecord> {
         raw_message: row.get(8)?,
         revoked: row.get::<_, i32>(9)? != 0,
     })
+}
+
+fn row_to_outgoing_record(row: &rusqlite::Row) -> rusqlite::Result<OutgoingRecord> {
+    Ok(OutgoingRecord {
+        client_id: row.get(0)?,
+        chat_id: row.get(1)?,
+        chat_type: row.get(2)?,
+        source_group_id: row.get(3)?,
+        sender_id: row.get(4)?,
+        sender_name: row.get(5)?,
+        time: row.get(6)?,
+        message: row.get(7)?,
+        payload: row.get(8)?,
+        raw_message: row.get(9)?,
+        state: row.get(10)?,
+        server_message_id: row.get(11)?,
+        error: row.get(12)?,
+        retry_count: row.get(13)?,
+        echo: row.get(14)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_moves_database_files_but_keeps_key() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "stapxs-db-rebuild-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        for name in [
+            "messages.db",
+            "messages.db-wal",
+            "messages.db-shm",
+            "messages.db-journal",
+        ] {
+            fs::write(test_dir.join(name), name.as_bytes()).unwrap();
+        }
+        fs::write(test_dir.join("messages.dbkey"), b"keep-this-key").unwrap();
+
+        let result = backup_database_files(&test_dir).unwrap();
+        let backup_dir = PathBuf::from(result.backup_directory.unwrap());
+
+        assert_eq!(result.moved_files, 4);
+        assert!(test_dir.join("messages.dbkey").exists());
+        assert!(!test_dir.join("messages.db").exists());
+        assert!(backup_dir.join("messages.db").exists());
+        assert!(backup_dir.join("messages.db-wal").exists());
+        assert!(backup_dir.join("messages.db-shm").exists());
+        assert!(backup_dir.join("messages.db-journal").exists());
+
+        fs::remove_dir_all(&test_dir).unwrap();
+    }
 }

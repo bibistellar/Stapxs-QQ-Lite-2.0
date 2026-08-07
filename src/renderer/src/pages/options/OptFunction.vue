@@ -168,7 +168,7 @@
                     <span>{{ $t('你可以使用其他组合键来换行') }}</span>
                 </div>
                 <div class="select-wrapper">
-                    <select v-if="backend.platform === 'darwin' || backend.platform === 'ios'" id="opt-function-send-key" v-model="settingsStore.sysConfig.send_key"
+                    <select v-if="backend.platform === 'darwin'" id="opt-function-send-key" v-model="settingsStore.sysConfig.send_key"
                         name="send_key" title="send_key" @change="save">
                         <option value="none">
                             Enter
@@ -292,30 +292,46 @@
             </div>
         </div>
         <div v-if="backend.type === 'tauri'" class="ss-card">
-            <header>{{ $t('消息存储') }}</header>
-            <div
-                class="opt-item"
-                :style="{ 'background': settingsStore.sysConfig.enable_local_history ? 'var(--color-card-1)' : 'none' }">
-                <div :class="checkDefault('enable_local_history')" />
-                <font-awesome-icon :icon="['fas', 'database']" />
+            <header>{{ $t('应用更新') }}</header>
+            <div class="tip">
+                {{ $t('更新包会经过签名验证，通过后才会安装。') }}
+            </div>
+            <div class="opt-item">
+                <div :class="checkDefault('auto_check_update')" />
+                <font-awesome-icon :icon="['fas', 'arrows-rotate']" />
                 <div>
-                    <label for="opt-function-enable-local-history">{{ $t('启用消息存储') }}</label>
-                    <span>{{ $t('保存消息记录何尝不是一种囤囤鼠') }}</span>
+                    <label for="opt-function-auto-check-update">{{ $t('自动检查更新') }}</label>
+                    <span>{{ $t('启动后检查，并在客户端长期运行时定期检查') }}</span>
                 </div>
                 <label class="ss-switch">
-                    <input id="opt-function-enable-local-history" v-model="settingsStore.sysConfig.enable_local_history"
-                        type="checkbox" name="enable_local_history" @change="save">
+                    <input id="opt-function-auto-check-update" v-model="settingsStore.sysConfig.auto_check_update"
+                        type="checkbox" name="auto_check_update" @change="save">
                     <div>
                         <div />
                     </div>
                 </label>
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="tip">
+            <div class="opt-item">
+                <font-awesome-icon :icon="['fas', 'download']" />
+                <div>
+                    <label>{{ $t('手动检查') }}</label>
+                    <span>{{ $t('立即检查是否有可安装的新版本') }}</span>
+                </div>
+                <button class="ss-button" type="button"
+                    :disabled="checkingUpdate"
+                    @click="runManualUpdateCheck">
+                    {{ checkingUpdate ? $t('检查中') : $t('检查') }}
+                </button>
+            </div>
+        </div>
+        <div v-if="backend.type === 'tauri'" class="ss-card">
+            <header>{{ $t('消息存储') }}</header>
+            <div class="tip">
                 {{
-                    $t('Stapxs QQ Lite 支持将消息缓存至本地，消息将以加密数据库的方式安全的保存。')
+                    $t('消息会自动保存至本地加密数据库，此功能始终启用。')
                 }}
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="opt-item">
+            <div class="opt-item">
                 <div :class="checkDefault('mixed_load_messages')" />
                 <font-awesome-icon :icon="['fas', 'shuffle']" />
                 <div>
@@ -332,7 +348,7 @@
                     </div>
                 </label>
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history" class="opt-item">
+            <div class="opt-item">
                 <div :class="checkDefault('disable_local_history_image_cache')" />
                 <font-awesome-icon :icon="['fas', 'image']" />
                 <div>
@@ -349,7 +365,7 @@
                     </div>
                 </label>
             </div>
-            <div v-if="settingsStore.sysConfig.enable_local_history && dbStats != null" class="db-stats-cards">
+            <div v-if="dbStats != null" class="db-stats-cards">
                 <div class="db-stat-card">
                     <font-awesome-icon :icon="['fas', 'message']" />
                     <span class="db-stat-value">{{ dbStats.totalMessages.toLocaleString() }}</span>
@@ -365,6 +381,18 @@
                     <span class="db-stat-value">{{ dbStats.imageCount > 0 ? formatDbSize(dbStats.imageCacheBytes) : '-' }}</span>
                     <span class="db-stat-label">{{ $t('图片缓存') }}{{ dbStats.imageCount > 0 ? '\u00a0(' + dbStats.imageCount.toLocaleString() + ')' : '' }}</span>
                 </div>
+            </div>
+            <div class="opt-item">
+                <font-awesome-icon :icon="['fas', 'database']" />
+                <div>
+                    <label>{{ $t('重建本地数据库') }}</label>
+                    <span>{{ $t('备份并重建数据库，用于处理旧版本数据库不兼容或损坏') }}</span>
+                </div>
+                <button class="ss-button" type="button"
+                    :disabled="rebuildingDatabase"
+                    @click="confirmRebuildLocalDatabase">
+                    {{ rebuildingDatabase ? $t('处理中') : $t('重建') }}
+                </button>
             </div>
         </div>
         <div class="ss-card">
@@ -432,7 +460,8 @@
 
     import UmamiInfoPan from '@renderer/components/UmamiInfoPan.vue'
     import { backend } from '@renderer/runtime/backend'
-    import { dbClearImages, dbGetStats } from '@renderer/function/utils/localHistoryUtil'
+    import { checkUpdate } from '@renderer/function/utils/appUtil'
+    import { dbClearImages, dbGetStats, dbRebuild } from '@renderer/function/utils/localHistoryUtil'
     import { useSettingsStore } from '@renderer/state/settings'
     import { useAuthStore } from '@renderer/state/auth'
     import { useUIStore } from '@renderer/state/ui'
@@ -446,19 +475,13 @@
 
     const dbStats = ref<{ totalMessages: number; imageCount: number; imageCacheBytes: number; dbSizeBytes: number } | null>(null)
     const clearImageProgressText = ref('')
+    const rebuildingDatabase = ref(false)
+    const checkingUpdate = ref(false)
     const ndt = ref(0)
     const ndv = ref(false)
 
     watch(() => authStore.loginInfo.uin, (uin) => {
-        if (uin && settingsStore.sysConfig.enable_local_history) {
-            loadDbStats()
-        }
-    }, { immediate: true })
-
-    watch(() => settingsStore.sysConfig.enable_local_history, (enabled) => {
-        if (enabled && authStore.loginInfo.uin) {
-            loadDbStats()
-        }
+        if (uin) loadDbStats()
     }, { immediate: true })
 
     async function loadDbStats() {
@@ -472,6 +495,52 @@
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
         if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+    }
+
+    function confirmRebuildLocalDatabase() {
+        if (rebuildingDatabase.value) return
+        const popInfo = {
+            title: $t('重建本地数据库'),
+            html: `<span>${$t('重建将清空当前本地消息、图片缓存和待发送消息。旧数据库文件会备份到应用数据目录，完成后应用将自动重启。是否继续？')}</span>`,
+            button: [
+                {
+                    text: $t('确认重建'),
+                    fun: async() => {
+                        uiStore.popBoxList.shift()
+                        rebuildingDatabase.value = true
+                        const result = await dbRebuild()
+                        if (result === null) {
+                            rebuildingDatabase.value = false
+                            new PopInfo().add(
+                                PopType.ERR,
+                                $t('本地数据库备份失败，未执行重建'),
+                                false,
+                            )
+                            return
+                        }
+                        await backend.call(undefined, 'win:relaunch', false)
+                    },
+                },
+                {
+                    text: $t('取消'),
+                    master: true,
+                    fun: () => {
+                        uiStore.popBoxList.shift()
+                    },
+                },
+            ],
+        }
+        uiStore.popBoxList.push(popInfo)
+    }
+
+    async function runManualUpdateCheck() {
+        if (checkingUpdate.value) return
+        checkingUpdate.value = true
+        try {
+            await checkUpdate(true)
+        } finally {
+            checkingUpdate.value = false
+        }
     }
 
     function showUmamiInfo() {

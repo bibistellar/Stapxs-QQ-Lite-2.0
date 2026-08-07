@@ -199,11 +199,11 @@
         UserGroupElem,
     } from '@renderer/function/elements/information'
     import { getRaw as getOpt, run as runOpt } from '@renderer/function/option'
-    import { changeGroupNotice, loadHistoryMessage } from '@renderer/function/utils/appUtil'
+    import { changeGroupNotice } from '@renderer/function/utils/appUtil'
     import { PopInfo, PopType } from '@renderer/function/base'
     import { MenuStatue } from 'vue3-bcui/packages/dist/types'
     import { library } from '@fortawesome/fontawesome-svg-core'
-    import { login as loginInfo } from '@renderer/function/connect'
+    import { Connector, login as loginInfo } from '@renderer/function/connect'
     import { canGroupNotice, getShowName } from '@renderer/function/utils/msgUtil'
 
     import {
@@ -215,7 +215,6 @@
     } from '@fortawesome/free-solid-svg-icons'
     import { Notify } from '@renderer/function/notify'
     import { refreshFavicon } from '@renderer/function/favicon'
-    import { backend } from '@renderer/runtime/backend'
     import History from '@renderer/components/History.vue'
     import { useUIStore } from '@renderer/state/ui'
     import { useAuthStore } from '@renderer/state/auth'
@@ -372,9 +371,19 @@
             item.highlight = undefined
             contactStore.baseOnMsgList.set(id, item)
         }
-        // 标记消息已读
-        const type = data.group_id ? 'group' : 'user'
-        loadHistoryMessage(id, type, 1, 'readMemberMessage')
+        // SnowLuma 可以直接按最近一条消息 ID 标记已读，无需先请求一遍历史。
+        if (item?.message_id != null) {
+            const isGroup = data.group_id != null
+            Connector.send(
+                isGroup ? 'mark_group_msg_as_read' : 'mark_private_msg_as_read',
+                {
+                    message_id: item.message_id,
+                    group_id: isGroup ? id : undefined,
+                    user_id: isGroup ? undefined : id,
+                },
+                'setMessageRead',
+            )
+        }
         // pop
         new PopInfo().add(
             PopType.INFO,
@@ -570,7 +579,7 @@
      * 显示群收纳盒
      */
     function showGroupAssistCheck() {
-        if(!showGroupAssist.value && chatStore.chatInfo.show.id == 0 && backend.type != 'capacitor' ) {
+        if(!showGroupAssist.value && chatStore.chatInfo.show.id == 0) {
             // 如果没有打开聊天框，打开收纳盒中的第一个群；这么做主要是为了防止动画穿帮
             const assistGroup = document.getElementById('group-assist-message-list-body')
             if(assistGroup && assistGroup.children.length > 0) {

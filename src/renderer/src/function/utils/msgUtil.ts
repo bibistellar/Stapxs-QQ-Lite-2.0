@@ -18,9 +18,23 @@ import { useContactStore } from '@renderer/state/contact'
 import { useUIStore } from '@renderer/state/ui'
 import { useAuthStore } from '@renderer/state/auth'
 import { useChatStore } from '@renderer/state/chat'
-import { prepareOutgoingMessage } from '../outgoingMessage'
+import {
+    prepareOutgoingMessage,
+    setOutgoingMessageState,
+    type OutgoingMessageState,
+} from '../outgoingMessage'
+import {
+    dbGetOutgoing,
+    dbMarkSendingUncertain,
+    dbSaveOutgoing,
+    dbUpdateOutgoingState,
+} from './localHistoryUtil'
 
 const logger = new Logger()
+const OUTGOING_CONFIRM_TIMEOUT = 30000
+let activeOutgoingClientId: string | undefined
+let outgoingQueueFlushing = false
+const outgoingConfirmTimers = new Map<string, number>()
 
 /**
  * 根据 JSON Path 映射数据返回需要的内容体
@@ -420,8 +434,195 @@ export function parseCQ(data: any) {
     return data
 }
 
+function findRuntimeOutgoing(clientId: string) {
+    const chatStore = useChatStore()
+    return chatStore.pendingOutgoingMessages.get(clientId)?.message ??
+        chatStore.messageList.find((item) => item.client_id === clientId)
+}
+
+function updateRuntimeOutgoingState(
+    clientId: string,
+    state: OutgoingMessageState,
+    error?: string,
+) {
+    const message = findRuntimeOutgoing(clientId)
+    if (message) setOutgoingMessageState(message, state, error)
+}
+
+function clearOutgoingConfirmTimer(clientId: string) {
+    const timer = outgoingConfirmTimers.get(clientId)
+    if (timer !== undefined) window.clearTimeout(timer)
+    outgoingConfirmTimers.delete(clientId)
+}
+
+function buildSnowLumaPayload(message: any): string | any[] {
+    const source = JSON.parse(JSON.stringify(message.outgoing_payload ?? message.message))
+    const uiStore = useUIStore()
+    if (uiStore.msgType !== BotMsgType.Array || !Array.isArray(source)) return source
+
+    return source.map((item: any) => {
+        const data = { ...item }
+        delete data.type
+        if (data._type != undefined) {
+            data.type = data._type
+            delete data._type
+        }
+        return { type: item.type, data }
+    })
+}
+
+async function startPersistedOutgoing(message: any) {
+    const authStore = useAuthStore()
+    const chatStore = useChatStore()
+    const clientId = String(message.client_id)
+    if (!login.status || activeOutgoingClientId !== undefined) return
+
+    const marked = await dbUpdateOutgoingState(
+        authStore.loginInfo.uin,
+        clientId,
+        'sending',
+    )
+    if (!marked) {
+        await markOutgoingFailed(clientId, '无法更新本地发送状态')
+        return
+    }
+    if (!login.status) {
+        await markOutgoingUncertain(clientId, '发送前连接已中断，发送结果未知')
+        return
+    }
+
+    activeOutgoingClientId = clientId
+    setOutgoingMessageState(message, 'sending')
+    chatStore.pendingOutgoingMessages.set(clientId, {
+        chatId: Number(message.infoList.group_id ?? message.infoList.target_id),
+        message,
+    })
+
+    const targetId = message.source_group_id? `${message.infoList.target_id}/${message.source_group_id}`: String(message.infoList.group_id ?? message.infoList.target_id)
+    sendSnowLumaMessage(
+        targetId,
+        buildSnowLumaPayload(message),
+        message.message_type === 'group' ? 'group' : 'user',
+        `${message.echo ?? 'sendMsgBack'}_uuid_${clientId}`,
+    )
+    sendStatEvent('send_msg', { type: message.message_type })
+
+    clearOutgoingConfirmTimer(clientId)
+    outgoingConfirmTimers.set(clientId, window.setTimeout(() => {
+        void markOutgoingUncertain(clientId, '等待 SnowLuma 发送回执超时')
+    }, OUTGOING_CONFIRM_TIMEOUT))
+}
+
+/** 加载 SQLite 发件箱，并按顺序发送一条 pending 消息。 */
+export async function flushPendingOutgoingMessages() {
+    if (outgoingQueueFlushing || activeOutgoingClientId || !login.status) return
+    const authStore = useAuthStore()
+    if (!authStore.loginInfo.uin) return
+
+    outgoingQueueFlushing = true
+    try {
+        const pending = await dbGetOutgoing(
+            authStore.loginInfo.uin,
+            undefined,
+            ['pending'],
+        )
+        const next = pending[0]
+        if (!next || activeOutgoingClientId || !login.status) return
+
+        const chatStore = useChatStore()
+        const clientId = String(next.client_id)
+        const runtimeMessage = findRuntimeOutgoing(clientId) ?? next
+        chatStore.pendingOutgoingMessages.set(clientId, {
+            chatId: Number(runtimeMessage.infoList.group_id ?? runtimeMessage.infoList.target_id),
+            message: runtimeMessage,
+        })
+        if (
+            Number(chatStore.chatInfo.show.id) ===
+                Number(runtimeMessage.infoList.group_id ?? runtimeMessage.infoList.target_id) &&
+            !chatStore.messageList.some((item) => item.client_id === clientId)
+        ) {
+            chatStore.messageList.push(runtimeMessage)
+        }
+        await startPersistedOutgoing(runtimeMessage)
+    } finally {
+        outgoingQueueFlushing = false
+    }
+}
+
+export function finishOutgoingAttempt(clientId: string) {
+    clearOutgoingConfirmTimer(clientId)
+    if (activeOutgoingClientId === clientId) activeOutgoingClientId = undefined
+    void flushPendingOutgoingMessages()
+}
+
+export async function markOutgoingFailed(
+    clientId: string,
+    error: string,
+    notify = true,
+) {
+    const authStore = useAuthStore()
+    clearOutgoingConfirmTimer(clientId)
+    await dbUpdateOutgoingState(authStore.loginInfo.uin, clientId, 'failed', { error })
+    updateRuntimeOutgoingState(clientId, 'failed', error)
+    if (activeOutgoingClientId === clientId) activeOutgoingClientId = undefined
+    if (notify) new PopInfo().add(PopType.ERR, error, false)
+    void flushPendingOutgoingMessages()
+}
+
+export async function markOutgoingUncertain(clientId: string, error: string) {
+    const authStore = useAuthStore()
+    clearOutgoingConfirmTimer(clientId)
+    await dbUpdateOutgoingState(authStore.loginInfo.uin, clientId, 'uncertain', { error })
+    updateRuntimeOutgoingState(clientId, 'uncertain', error)
+    if (activeOutgoingClientId === clientId) activeOutgoingClientId = undefined
+    void flushPendingOutgoingMessages()
+}
+
+/** 链路断开时禁止自动重发已经进入网络层的消息。 */
+export async function markSendingOutgoingUncertain(error = '连接中断，发送结果未知') {
+    const authStore = useAuthStore()
+    if (!authStore.loginInfo.uin) return
+    outgoingConfirmTimers.forEach((timer) => window.clearTimeout(timer))
+    outgoingConfirmTimers.clear()
+    activeOutgoingClientId = undefined
+    await dbMarkSendingUncertain(authStore.loginInfo.uin, error)
+    const chatStore = useChatStore()
+    chatStore.pendingOutgoingMessages.forEach(({ message }) => {
+        if (message.outgoing_state === 'sending') {
+            setOutgoingMessageState(message, 'uncertain', error)
+        }
+    })
+}
+
+export async function retryOutgoingMessage(message: any) {
+    if (message.outgoing_state !== 'failed') return
+    const authStore = useAuthStore()
+    const clientId = String(message.client_id)
+    let updated = await dbUpdateOutgoingState(
+        authStore.loginInfo.uin,
+        clientId,
+        'pending',
+        { incrementRetry: true },
+    )
+    message.retry_count = Number(message.retry_count ?? 0) + 1
+    setOutgoingMessageState(message, 'pending')
+    if (!updated) {
+        updated = await dbSaveOutgoing(
+            authStore.loginInfo.uin,
+            message,
+            message.echo ?? 'sendMsgBack',
+        )
+    }
+    if (!updated) {
+        setOutgoingMessageState(message, 'failed', '无法写入本地发件箱')
+        new PopInfo().add(PopType.ERR, '消息未能写入本地数据库', false)
+        return
+    }
+    void flushPendingOutgoingMessages()
+}
+
 /**
-* 发送消息
+* 将发送意图先持久化到 SQLite，再由发件箱在连接可用时发送。
 * @param id 发送对象的 id
 * @param type 发送对象的类型
 * @param msg 消息体
@@ -437,24 +638,16 @@ export function sendMsgRaw(
 ) {
     const chatStore = useChatStore()
     const authStore = useAuthStore()
-    const uiStore = useUIStore()
-    if (!login.status) {
-        new PopInfo().add(
-            PopType.ERR,
-            app.config.globalProperties.$t('当前处于离线模式，无法发送消息'),
-            false,
-        )
-        return
-    }
     // 如果消息为空则不发送
     if (msg == undefined || msg == '' || (Array.isArray(msg) && msg.length == 0)) {
         return
     }
-    // 预发送消息
-    // 将消息构建为完整消息体先显示出去
     const msgUUID = uuid()
-    if (preShow) {
-        const preShowMsg = JSON.parse(JSON.stringify(msg));
+    const [rawChatId, rawSourceGroupId] = String(id).split('/')
+    const chatId = Number(rawChatId)
+    const displayMsg = Array.isArray(msg)? JSON.parse(JSON.stringify(msg)): [{ type: 'text', text: String(msg) }]
+    if (Array.isArray(displayMsg)) {
+        const preShowMsg = displayMsg
         preShowMsg.forEach((item: any) => {
             // 对 base64 图片做特殊处理
             if (item.type == 'image') {
@@ -466,193 +659,89 @@ export function sendMsgRaw(
                 }
             }
         })
-        const showMsg = {
-            revoke: true,
-            fake_msg: true,
-            message_id: msgUUID,
-            fake_message_id: msgUUID,       // 用来作为这条消息的唯一标识，防止 message_id 刷新导致的闪烁
-            message_type: chatStore.chatInfo.show.type,
-            time: parseInt(String(new Date().getTime() / 1000)),
-            post_type: 'message',
-            sender: {
-                user_id: authStore.loginInfo.uin,
-                nickname: authStore.loginInfo.nickname,
-            },
-            message: preShowMsg,
-        } as { [key: string]: any }
-        showMsg.raw_message = getMsgRawTxt(showMsg)
-        const chatId = Number(chatStore.chatInfo.show.id)
-        prepareOutgoingMessage(
-            showMsg,
-            chatId,
-            chatStore.chatInfo.show.type,
-            authStore.loginInfo.uin,
-        )
-        chatStore.pendingOutgoingMessages.set(msgUUID, {
-            chatId,
-            message: showMsg,
-        })
-        chatStore.messageList = chatStore.messageList.concat([showMsg])
     }
-    // 检查消息体是否需要处理
-    if (uiStore.msgType == BotMsgType.Array) {
-        if (msg && typeof msg != 'string') {
-            const newMsg = [] as any
-            msg.forEach((item) => {
-                const newResult = {} as { [key: string]: any }
-                newResult.type = item.type
-                newResult.data = item
-                delete newResult.data.type
-                // 特殊处理，如果 newResult.data 里有 _type 字段，给它改成 type
-                if (newResult.data._type != undefined) {
-                    newResult.data.type = newResult.data._type
-                    delete newResult.data._type
-                }
-                newMsg.push(newResult)
-            })
-            msg = newMsg
+    const showMsg = {
+        revoke: true,
+        fake_msg: true,
+        message_id: msgUUID,
+        fake_message_id: msgUUID,
+        client_id: msgUUID,
+        outgoing_state: 'pending',
+        outgoing_payload: JSON.parse(JSON.stringify(msg)),
+        source_group_id: rawSourceGroupId ? Number(rawSourceGroupId) : undefined,
+        echo,
+        message_type: type === 'group' ? 'group' : 'private',
+        time: Math.floor(Date.now() / 1000),
+        post_type: 'message_sent',
+        sender: {
+            user_id: authStore.loginInfo.uin,
+            nickname: authStore.loginInfo.nickname,
+        },
+        message: displayMsg,
+    } as { [key: string]: any }
+    showMsg.raw_message = getMsgRawTxt(showMsg)
+    prepareOutgoingMessage(showMsg, chatId, type, authStore.loginInfo.uin)
+    chatStore.pendingOutgoingMessages.set(msgUUID, { chatId, message: showMsg })
+    if (preShow) chatStore.messageList = chatStore.messageList.concat([showMsg])
+
+    const contactStore = useContactStore()
+    let session = contactStore.baseOnMsgList.get(chatId) ??
+        contactStore.userList.find((item) => Number(item.user_id ?? item.group_id) === chatId)
+    if (!session) {
+        if (type === 'group') {
+            session = {
+                group_id: chatId,
+                group_name: String(chatId),
+                member_count: 0,
+            } as UserFriendElem & UserGroupElem
+        } else {
+            session = {
+                user_id: chatId,
+                nickname: String(chatId),
+                remark: String(chatId),
+            } as UserFriendElem & UserGroupElem
         }
     }
-    if (msg !== undefined && msg.length > 0) {
-        if (authStore.jsonMap.name === 'Lagrange.OneBot') {
-            lgrSendMsg(id, msg, type, echo + '_uuid_' + msgUUID)
-            sendStatEvent('send_msg', { type: type })
+    session.message_id = msgUUID
+    session.raw_msg_base = showMsg.raw_message
+    session.raw_msg = type === 'group'? `${authStore.loginInfo.nickname}: ${showMsg.raw_message}`: showMsg.raw_message
+    session.time = Date.now()
+    contactStore.baseOnMsgList.set(chatId, session)
+    updateBaseOnMsgList()
+
+    void dbSaveOutgoing(authStore.loginInfo.uin, showMsg, echo).then((saved) => {
+        if (!saved) {
+            setOutgoingMessageState(showMsg, 'failed', '无法写入本地发件箱')
+            new PopInfo().add(PopType.ERR, '消息未能写入本地数据库', false)
             return
         }
-        switch (type) {
-            case 'group':
-                Connector.send(
-                    authStore.jsonMap.message_list.name_group_send ??
-                    'send_msg',
-                    { group_id: id, message: msg },
-                    echo + '_uuid_' + msgUUID,
-                )
-                break
-            case 'user': {
-                if (String(id).indexOf('/') > 1) {
-                    Connector.send(
-                        authStore.jsonMap.message_list.name_temp_send ??
-                        'send_temp_msg',
-                        {
-                            user_id: id.split('/')[0],
-                            group_id: id.split('/')[1],
-                            message: msg,
-                        },
-                        echo + '_uuid_' + msgUUID,
-                    )
-                } else {
-                    Connector.send(
-                        authStore.jsonMap.message_list.name_user_send ??
-                        'send_msg',
-                        { user_id: id, message: msg },
-                        echo + '_uuid_' + msgUUID,
-                    )
-                }
-                break
-            }
-        }
-        sendStatEvent('send_msg', { type: type })
+        void flushPendingOutgoingMessages()
+    })
+
+    if (!login.status) {
+        new PopInfo().add(
+            PopType.INFO,
+            app.config.globalProperties.$t('消息将在连接恢复后发送'),
+            false,
+        )
     }
 }
 
 export function updateLastestHistory(item: UserFriendElem & UserGroupElem) {
-    const authStore = useAuthStore()
     // 发起获取历史消息请求
     const type = item.user_id ? 'user' : 'group'
     const id = item.user_id ? item.user_id : item.group_id
-    let name
-    if (authStore.jsonMap.message_list && type != 'group') {
-        name = authStore.jsonMap.message_list.private_name
-    } else {
-        name = authStore.jsonMap.message_list.name
-    }
+    const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
     Connector.send(
-        name ?? 'get_chat_history',
+        name,
         {
-            message_type: authStore.jsonMap.message_list.message_type[type],
-            group_id: id,
-            user_id: id,
-            message_seq: 0,
+            group_id: type === 'group' ? id : undefined,
+            user_id: type !== 'group' ? id : undefined,
             message_id: 0,
             count: 1,
         },
         'getChatHistoryOnMsg_' + id,
     )
-}
-
-// 本地会话持久化 =====================================================
-// PS：SnowLuma 等服务端的 get_recent_contact 恒返回空数组，导致每次启动 / 重连后
-//     会话列表整个丢失。这里把「已经出现在会话列表里的会话」按账号存到本地，下次
-//     启动或重连后据此把会话塞回列表，并从服务端拉取每个会话最新一条消息立即刷新。
-const LOCAL_SESSION_LIMIT = 200
-let saveLocalSessionsTimer: number | undefined = undefined
-
-function readLocalSessionStore(): { [uin: string]: number[] } {
-    const raw = option.get('local_sessions')
-    if (raw && typeof raw === 'object') {
-        return raw as { [uin: string]: number[] }
-    }
-    if (typeof raw === 'string') {
-        try {
-            const parsed = JSON.parse(raw)
-            if (parsed && typeof parsed === 'object') return parsed
-        } catch {
-            // ignore
-        }
-    }
-    return {}
-}
-
-/**
- * 把当前会话列表（baseOnMsgList 的键）持久化到本地，按账号区分
- */
-export function saveLocalSessions() {
-    const contactStore = useContactStore()
-    const authStore = useAuthStore()
-    const uin = authStore.loginInfo?.uin
-    if (uin == undefined) return
-    const ids = [...contactStore.baseOnMsgList.keys()]
-        .filter((id) => Number.isFinite(id) && id > 0)
-        .slice(0, LOCAL_SESSION_LIMIT)
-    const store = readLocalSessionStore()
-    store[String(uin)] = ids
-    option.save('local_sessions', JSON.stringify(store))
-}
-
-/**
- * 去抖保存，避免每条消息都写一次本地存储
- */
-export function scheduleSaveLocalSessions() {
-    if (saveLocalSessionsTimer) return
-    saveLocalSessionsTimer = window.setTimeout(() => {
-        saveLocalSessionsTimer = undefined
-        saveLocalSessions()
-    }, 2000)
-}
-
-/**
- * 启动 / 重连后：根据本地保存的会话，把会话塞回列表并拉取最新一条消息
- * PS：与 get_recent_contact 的回调走同一套「找用户 → set → 拉最新」逻辑，靠
- *     baseOnMsgList 去重，因此对返回了真实最近会话的服务端不会产生重复。
- */
-export function restoreLocalSessions() {
-    const contactStore = useContactStore()
-    const authStore = useAuthStore()
-    const uin = authStore.loginInfo?.uin
-    if (uin == undefined) return
-    const ids = readLocalSessionStore()[String(uin)]
-    if (!Array.isArray(ids)) return
-    ids.forEach((rawId) => {
-        const id = Number(rawId)
-        if (!Number.isFinite(id) || id <= 0) return
-        if (contactStore.baseOnMsgList.get(id) != undefined) return
-        const user = contactStore.userList.find((item) =>
-            Number(item.user_id) === id || Number(item.group_id) === id)
-        if (user) {
-            contactStore.baseOnMsgList.set(id, user)
-            updateLastestHistory(user)
-        }
-    })
 }
 
 function getSessionId(item: UserFriendElem & UserGroupElem) {
@@ -735,8 +824,6 @@ export function updateBaseOnMsgList() {
     contactStore.onMsgList = onMsgList
     contactStore.groupAssistList = groupAssistList
 
-    // 会话列表有变化，去抖持久化到本地，供下次启动 / 重连时重建
-    scheduleSaveLocalSessions()
 }
 
 /**
@@ -757,7 +844,7 @@ export function canGroupNotice(id: number) {
 /**
  * 戳一戳触发动画
  * @param animeBody 动画作用的元素
- * @param windowInfo 窗口信息，在 electron 中使用
+ * @param windowInfo Tauri 窗口信息
  */
 export function pokeAnime(animeBody: HTMLElement | null, windowInfo = null as {
     x: number
@@ -1015,10 +1102,14 @@ export function getDifferencesWithRanges(a: string, b: string) {
 }
 
 /**
- * lgr专用发送消息，懒得写了，不做通用适配，胡乱应付下吧
+ * 按 SnowLuma 的 OneBot v11 action 发送普通消息或合并转发。
  * @param msg 消息内容
  */
-function lgrSendMsg(id: string, msg: any, type: string, cb: string) {
+function sendSnowLumaMessage(id: string, msg: any, type: string, cb: string) {
+    const [rawUserId, rawSourceGroupId] = String(id).split('/')
+    const targetId = Number(rawUserId)
+    const sourceGroupId = rawSourceGroupId ? Number(rawSourceGroupId) : undefined
+
     if (msg[0].type === 'node') {
         const sendMsgs = [] as any[]
         msg.forEach((item) => {
@@ -1042,33 +1133,37 @@ function lgrSendMsg(id: string, msg: any, type: string, cb: string) {
         if (type === 'group') {
             Connector.send(
                 'send_group_forward_msg',
-                { group_id: id, messages: sendMsgs },
+                { group_id: targetId, messages: sendMsgs },
                 cb,
             )
         } else if (type === 'user') {
             Connector.send(
                 'send_private_forward_msg',
-                { user_id: id, messages: sendMsgs },
+                { user_id: targetId, messages: sendMsgs },
                 cb,
             )
         } else {
-            new PopInfo().add(PopType.ERR, 'lgr不支持匿名聊天')
+            new PopInfo().add(PopType.ERR, 'SnowLuma 不支持此会话类型')
         }
     } else {
         if (type === 'group') {
             Connector.send(
                 'send_group_msg',
-                { group_id: id, message: msg },
+                { group_id: targetId, message: msg },
                 cb,
             )
         } else if (type === 'user') {
             Connector.send(
                 'send_private_msg',
-                { user_id: id, message: msg },
+                {
+                    user_id: targetId,
+                    group_id: sourceGroupId,
+                    message: msg,
+                },
                 cb,
             )
         } else {
-            new PopInfo().add(PopType.ERR, 'lgr不支持匿名聊天')
+            new PopInfo().add(PopType.ERR, 'SnowLuma 不支持此会话类型')
         }
     }
 }

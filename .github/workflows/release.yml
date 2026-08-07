@@ -1,9 +1,10 @@
-# 主分支构建发布
+# 正式版本构建发布
 name: build-app
 on:
     push:
-        branches:
-            - next
+        tags:
+            - 'v*'
+    workflow_dispatch:
 
 jobs:
     # ========================= 准备项目 =========================
@@ -21,81 +22,13 @@ jobs:
             # 初始化一些流程需要的环境变量
             - name: Init Env
               id: step_init
-              run: echo VERSION=$(node -p "require('./package.json').version") >> $GITHUB_OUTPUT
-
-    # ========================= 构建 Web 版本 =========================
-
-    build-root-web:
-        name: 构建 Web 版本
-        needs: init
-
-        uses: ./.github/workflows/build-web.yml
-        with:
-            version: ${{ needs.init.outputs.version }}
-
-    # ======================= 构建 Docker 版本 ========================
-
-    build-docker:
-        name: 构建 Docker 版本
-        # 仅上游仓库发布 Docker 镜像；fork 没有 DOCKER_PASSWORD，跳过以免无谓失败
-        if: github.repository_owner == 'Stapxs'
-        needs:
-            - init
-            - build-root-web
-
-        uses: ./.github/workflows/build-docker.yml
-        with:
-            version: ${{ needs.init.outputs.version }}
-        secrets:
-            DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-    # ==================== 构建 Github Pages 版本 =====================
-    build-pages:
-        name: 构建 Github Pages 版本
-        # 仅上游仓库部署 Pages；fork 未开启 gh-pages，跳过以免无谓失败
-        if: github.repository_owner == 'Stapxs'
-        runs-on: ubuntu-latest
-        needs: init
-        steps:
-            # 拉取代码
-            - name: Checkout
-              uses: actions/checkout@v4
-              with:
-                  submodules: recursive
-            - name: 启用 Corepack
-              run: corepack enable
-            # 设置 Node.js 版本
-            - name: Load Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 22.x
-                  cache: 'yarn'
-            # 更新依赖
-            - name: Install
-              run: yarn
-            # 构建
-            - name: Build
-              run: yarn build
-              env:
-                  BUILD_ENV: github-actions
-
-            # 部署 Web 版本
-            - name: Deploy
-              uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
-              with:
-                github_token: ${{ secrets.GITHUB_TOKEN }}
-                publish_dir: ./dist
-                publish_branch: gh-pages
-                force_orphan: true
-
-    # ========================= 构建 Electron 版本 =========================
-    # build-electron:
-    #     name: 构建 Electron
-    #     needs: init
-
-    #     uses: ./.github/workflows/build-electron.yml
-    #     with:
-    #         version: ${{ needs.init.outputs.version }}
+              run: |
+                  VERSION=$(node -p "require('./package.json').version")
+                  if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" != "v${VERSION}" ]; then
+                      echo "标签 ${{ github.ref_name }} 与 package.json 版本 v${VERSION} 不一致" >&2
+                      exit 1
+                  fi
+                  echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
     # ========================= 构建 Tauri 版本 =========================
 
@@ -105,6 +38,7 @@ jobs:
         uses: ./.github/workflows/build-tauri.yml
         with:
             version: ${{ needs.init.outputs.version }}
+        secrets: inherit
 
     # ========================= 发布构建结果 =========================
     release:
@@ -115,31 +49,33 @@ jobs:
             contents: write
         needs:
             - init
-            - build-root-web
-            # - build-electron
             - build-tauri
         steps:
+            - name: Checkout
+              uses: actions/checkout@v4
             # 下载构建结果
             - name: Download Artifacts
               id: download-artifact
               uses: actions/download-artifact@v4
               with:
-                  path: ${{ needs.init.outputs.version }}-*
+                  path: release-assets
                   pattern: ${{ needs.init.outputs.version }}-*
                   merge-multiple: true
             - name: Artifacts List
-              run: ls -R
+              run: find release-assets -maxdepth 1 -type f -print
+            - name: 生成自动更新清单
+              run: node scripts/generate-updater-json.mjs release-assets "${{ github.repository }}" "${{ needs.init.outputs.version }}" "正式发布版本 v${{ needs.init.outputs.version }}"
             # 发布构建结果
             - name: Publish Release
               uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
               with:
-                  files: ./${{ needs.init.outputs.version }}-*/*
+                  files: release-assets/*
                   tag_name: v${{ needs.init.outputs.version }}
                   body: |
                       # Release 自动构建
                       `这是一个自动构建版本，由 GitHub Actions 自动构建并发布。`
                       ## 更新内容
-                      ${{ github.event.head_commit.message }}
+                      正式发布版本 v${{ needs.init.outputs.version }}
                       ## 下载说明
                       - Windows：`.exe`（NSIS 安装包）
                       - Linux：`.AppImage` / `.deb`（x86_64 与 aarch64）
@@ -152,9 +88,8 @@ jobs:
                       > xattr -dr com.apple.quarantine "/Applications/Stapxs QQ Lite.app"
                       > ```
                       ## 自动构建信息
-                      - 构建时间：${{ github.event.head_commit.timestamp }}
-                      - 构建提交：${{ github.event.head_commit.id }}
-                      - 构建分支：${{ github.event.head_commit.tree_id }}
+                      - 构建提交：${{ github.sha }}
+                      - 构建引用：${{ github.ref_name }}
                   draft: false
                   prerelease: false
                   # 上游用 PAT（可触发下游工作流）；fork 无此 secret 时回退到内置 GITHUB_TOKEN

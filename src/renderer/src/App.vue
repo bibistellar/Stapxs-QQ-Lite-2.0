@@ -28,7 +28,7 @@
         data-tauri-drag-region="true" />
     <div id="base-app">
         <div class="main-body">
-            <ul :style="{ 'padding-bottom': get('fs_adaptation') > 0 ? `${get('fs_adaptation')}px` : '' }">
+            <ul>
                 <li id="bar-home" :class="(tags.page == 'Home' ? 'active' : '') +
                     ((loginInfo.status || loginInfo.localReady) ? ' hiden-home' : '')"
                     @click="changeTab('主页', 'Home', false)">
@@ -48,8 +48,7 @@
                 <div class="side-bar-space" />
                 <li v-if="tags.currentMusic"
                     :class="['music-entry', {
-                        'active': tags.showMusicPlayer,
-                        'music-entry-always-hide': backend.isMobile()
+                        'active': tags.showMusicPlayer
                     }]"
                     @click="toggleMusicPlayer(undefined)">
                     <img class="music-entry-cover"
@@ -71,8 +70,7 @@
                 </li>
                 <li v-if="tags.currentMusic"
                     :class="['music-entry-small', {
-                        'active': tags.showMusicPlayer,
-                        'music-entry-small-always-show': backend.isMobile()
+                        'active': tags.showMusicPlayer
                     }]"
                     @click="toggleMusicPlayer(undefined)">
                     <img class="music-entry-cover"
@@ -88,16 +86,16 @@
                     <font-awesome-icon :icon="['fas', 'arrow-down']" />
                 </li>
             </ul>
-            <div :style="{ 'height': get('fs_adaptation') > 0 ? `calc(100% - ${75 + Number(get('fs_adaptation'))}px)` : '' }">
+            <div>
                 <div v-if="tags.page == 'Home'" id="homeTab" name="主页">
                     <div class="home-body">
-                        <div v-if="!napcat" class="login-pan-card ss-card">
+                        <div class="login-pan-card ss-card">
                             <font-awesome-icon :icon="['fas', 'circle-nodes']" />
                             <p>{{ $t('连接到 OneBot') }}</p>
                             <form @submit.prevent @submit="connect">
                                 <template v-if="loginInfo.quickLogin == null || loginInfo.quickLogin.length == 0">
                                     <!-- 地址输入区域 -->
-                                    <div v-if="!sse" class="address-input-container">
+                                    <div class="address-input-container">
                                         <label class="address-input-wrapper">
                                             <font-awesome-icon :icon="['fas', 'link']" />
                                             <input id="sev_address" v-model="loginInfo.address" :placeholder="$t('连接地址')"
@@ -246,9 +244,8 @@
         <Transition name="modal">
             <div v-if="uiStore.popBoxList.length > 0" id="pop-box" class="pop-box">
                 <div :class="'pop-box-body ss-card' +
-                         (uiStore.popBoxList[0].full ? ' full' : '') +
-                         (get('option_view_no_window') == true ? '' : ' window')"
-                    :style="{ 'margin-bottom': get('fs_adaptation') > 0 ? `${40 + Number(get('fs_adaptation'))}px` : '' }">
+                    (uiStore.popBoxList[0].full ? ' full' : '') +
+                    (get('option_view_no_window') == true ? '' : ' window')">
                     <header v-show="uiStore.popBoxList[0].title != undefined">
                         <div v-if="uiStore.popBoxList[0].svg != undefined">
                             <font-awesome-icon :icon="['fas', uiStore.popBoxList[0].svg]" />
@@ -304,7 +301,6 @@ import { Connector, login as loginInfo, loadConnectionHistory, loadConnectionFro
 import { Logger, popList, PopInfo, LogType } from '@renderer/function/base'
 import { restoreDatabaseSessions, setLoginWaveTimer } from '@renderer/function/msg'
 import { BaseChatInfoElem } from '@renderer/function/elements/information'
-import { useConnectionStore } from '@renderer/state/connection'
 import { useUIStore } from '@renderer/state/ui'
 import { useSettingsStore } from '@renderer/state/settings'
 import { useChatStore } from '@renderer/state/chat'
@@ -312,7 +308,7 @@ import { useContactStore } from '@renderer/state/contact'
 import { useAuthStore } from '@renderer/state/auth'
 import { Notify } from './function/notify'
 import { updateBaseOnMsgList } from './function/utils/msgUtil'
-import { getDeviceType, getForegroundToneFromImageUrl } from './function/utils/systemUtil'
+import { getForegroundToneFromImageUrl } from './function/utils/systemUtil'
 import { uptime, i18n } from '@renderer/main'
 import { backend } from './runtime/backend'
 
@@ -337,15 +333,12 @@ const $t = i18n.global.t
 const repoName = import.meta.env.VITE_APP_REPO_NAME
 const appClient = backend
 const dev = import.meta.env.DEV
-const napcat = import.meta.env.VITE_NAPCAT
-const sse = import.meta.env.VITE_APP_SSE_MODE == 'true'
 const get = Option.get
 const popInfo = new PopInfo()
 const appMsgs = popList
 const loadHistory = App.loadHistory
 
 // 响应式状态
-const connectionStore = useConnectionStore()
 const uiStore = useUIStore()
 const settingsStore = useSettingsStore()
 const authStore = useAuthStore()
@@ -420,38 +413,8 @@ async function refreshCurrentMusic() {
     }
 }
 
-function updateNapcatColor(token: string) {
-    const logger = new Logger()
-    // api/base/Theme 获取主题配置信息
-    fetch('/api/Base/Theme', {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-        }
-    }).then(async (response) => {
-        if(response.ok) {
-            const data = await response.json()
-            const media = window.matchMedia('(prefers-color-scheme: dark)')
-            if(media.matches) {
-                const colorHsl = data.data.dark['--heroui-primary']
-                document.documentElement.style.setProperty('--color-main', `hsl(${colorHsl} / .3)`)
-                document.documentElement.style.setProperty('--color-main-0', `hsl(${colorHsl} / .3)`)
-            } else {
-                const colorHsl = data.data.light['--heroui-primary']
-                document.documentElement.style.setProperty('--color-main', `hsl(${colorHsl} / .1)`)
-                document.documentElement.style.setProperty('--color-main-0', `hsl(${colorHsl} / .1)`)
-            }
-        } else {
-            logger.error(null, 'Napcat 主题获取失败，状态码：' + response.status)
-        }
-    }).catch((error) => {
-        logger.error(null, 'Napcat 主题请求失败：' + error)
-    })
-}
-
 /**
- * electron 窗口操作
+ * Tauri 窗口操作
  */
 function controllWin(name: string) {
     backend.call(undefined, 'win:' + name, false)
@@ -837,8 +800,8 @@ onMounted(() => {
         window._AMapSecurityConfig = import.meta.env.VITE_APP_AMAP_SECRET
         // =============================================================
         // 初始化功能
-        App.createMenu() // Electron：创建菜单
-        App.createIpc() // Electron：创建 IPC 通信
+        App.createMenu()
+        App.createIpc()
         // 加载开发者相关功能
         if (dev) {
             document.title = 'Stapxs QQ Lite (Dev)'
@@ -875,45 +838,26 @@ onMounted(() => {
         }
         // 基础初始化完成
         logger.system('欢迎回来，开发者。Stapxs QQ Lite 正处于 ' + (dev ? 'development' : 'production') + ' 模式。正在为您加载更多功能。')
-        // 加载移动平台特性
-        App.loadMobile()
         // 加载额外样式
         App.loadAppendStyle()
-        document.body.style.setProperty('--safe-area-bottom',
-            (Option.get('fs_adaptation') > 0 ? Option.get('fs_adaptation') : 0) + 'px')
+        document.body.style.setProperty('--safe-area-bottom', '0')
         document.body.style.setProperty('--safe-area-top', '0')
         document.body.style.setProperty('--safe-area-left', '0')
         document.body.style.setProperty('--safe-area-right', '0')
-        // Capacitor：移动端初始化安全区域
-        if (backend.isMobile()) {
-            // 我把 viewer 挂在 body 上，所以css也得改到 body 上
-            const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-            if (safeArea) {
-                logger.add(LogType.DEBUG, '安全区域：', safeArea)
-                document.body.style.setProperty('--safe-area-top', safeArea.top + 'px')
-                document.body.style.setProperty('--safe-area-bottom', safeArea.bottom + 'px')
-                document.body.style.setProperty('--safe-area-left', safeArea.left + 'px')
-                document.body.style.setProperty('--safe-area-right', safeArea.right + 'px')
-                // 图片查看器安全区域
-                document.body.style.setProperty('--safe-area--viewer-top', safeArea.top + 'px')
-            }
-        }
         // 加载密码保存和自动连接
         loginInfo.address = settingsStore.sysConfig.address
         // 加载连接历史
         loginInfo.connectionHistory = loadConnectionHistory()
         // OneBot 是否在线不影响本地浏览：优先恢复最近一次账号的 SQLite 会话。
-        if (backend.type === 'tauri' && settingsStore.sysConfig.enable_local_history) {
-            const lastAccount = loginInfo.connectionHistory.find((item) => item.uin)
-            if (lastAccount?.uin) {
-                const restored = await restoreDatabaseSessions(
-                    lastAccount.uin,
-                    lastAccount.nickname,
-                )
-                if (restored > 0) {
-                    tags.page = 'Messages'
-                    tags.showChat = true
-                }
+        const lastAccount = loginInfo.connectionHistory.find((item) => item.uin)
+        if (lastAccount?.uin) {
+            const restored = await restoreDatabaseSessions(
+                lastAccount.uin,
+                lastAccount.nickname,
+            )
+            if (restored > 0) {
+                tags.page = 'Messages'
+                tags.showChat = true
             }
         }
         if (
@@ -926,93 +870,18 @@ onMounted(() => {
         if (settingsStore.sysConfig.auto_connect == true) {
             connect()
         }
-        if(napcat) {
-            logger.info('Stapxs QQ Lite 处于 Napcat 模式 ……')
-            const token = localStorage.getItem('token')
-            if(token) {
-                // api/Debug/create 获取连接配置信息
-                fetch('/api/Debug/create', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    }
-                }).then(async (response) => {
-                    if(response.ok) {
-                        const data = await response.json()
-                        // 获取当前页面的根 URL
-                        const rootUrl = window.location.origin
-                        loginInfo.address = rootUrl.replace('http', 'ws') + '/api/Debug/ws'
-                        loginInfo.token = data.data.token
-                        connect()
-                    } else {
-                        logger.error(null, 'Napcat 快速连接失败，状态码：' + response.status)
-                    }
-                }).catch((error) => {
-                    logger.error(null, 'Napcat 快速连接请求失败：' + error)
-                })
-                updateNapcatColor(token)
-                window.addEventListener('storage', (event) => {
-                    if(event.key === 'theme') {
-                        updateNapcatColor(token)
-                    }
-                })
-            }
-        }
         // 服务发现
         backend.call('Onebot', 'sys:findService', false)
         backend.call('OneBot', 'sys:frontLoaded', false)
         // =============================================================
         // 初始化完成
-        // 创建 popstate
-        if(backend.platform == 'web' && (getDeviceType() === 'Android' || getDeviceType() === 'iOS')) {
-            window.addEventListener('popstate', () => {
-                if((!loginInfo.status && !loginInfo.localReady) || uiStore.openSideBar) {
-                    // 离开提醒
-                    const popInfo = {
-                        title: $t('提醒'),
-                        html: `<span>${$t('离开 Stapxs QQ Lite？')}</span>`,
-                        button: [
-                            {
-                                text: $t('取消'),
-                                fun: () => {
-                                    uiStore.popBoxList.shift()
-                                    history.pushState('ssqqweb', '', location.href)
-                                },
-                            },
-                            {
-                                text: $t('离开'),
-                                master: true,
-                                fun: () => {
-                                    uiStore.popBoxList.shift()
-                                    history.back()
-                                },
-                            },
-                        ],
-                    }
-                    uiStore.popBoxList.push(popInfo)
-                } else {
-                    // 内部的页面返回处理，此处使用 watch backTimes 监听
-                    connectionStore.backTimes += 1
-                    history.pushState('ssqqweb', '', location.href)
-                }
-            });
-            if (history.state != 'ssqqweb') {
-                history.pushState('ssqqweb', '', location.href)
-            }
-        }
         // UM：加载 Umami 统计功能
         if (!Option.get('close_ga') && !dev) {
             const config = {
                 baseUrl: import.meta.env.VITE_APP_MU_ADDRESS,
                 websiteId: import.meta.env.VITE_APP_MU_ID
             } as any
-            // 给页面添加一个来源域名方便在非 web 端获取统计信息
-            if(!backend.isWeb()) {
-                config.hostName = backend.type + '.stapxs.cn'
-            } else if(napcat) {
-                config.hostName = 'napcat.stapxs.cn'
-            }
+            config.hostName = 'tauri.stapxs.cn'
             Umami.initialize(config)
             // 上报一些应用基础信息
             App.sendIdentifyData({
@@ -1023,7 +892,7 @@ onMounted(() => {
         } else if (dev) {
             logger.system('开发者，由于 Stapxs QQ Lite 运行在调试模式下，分析组件并未初始化 …… 系统将无法捕获开发者阁下的访问状态，请悉知。')
         }
-        App.checkUpdate() // 检查更新
+        App.startUpdateChecks() // 启动签名更新检查与长期定时检查
         App.checkOpenTimes() // 检查打开次数
         App.checkNotice() // 检查公告
         // 加载愚人节附加
@@ -1065,12 +934,8 @@ onMounted(() => {
             '这只是个普通的彩蛋！'
         ]
         const title = titleList[Math.floor(Math.random() * titleList.length)]
-        if(backend.platform == 'web') {
-            document.title = title + '- Stapxs QQ Lite'
-        } else {
-            document.title = title
-            backend.call(undefined, 'win:setTitle', false, title)
-        }
+        document.title = title
+        backend.call(undefined, 'win:setTitle', false, title)
     }
     // 页面关闭前
     window.onbeforeunload = () => {

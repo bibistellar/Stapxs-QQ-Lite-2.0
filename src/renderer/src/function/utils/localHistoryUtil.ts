@@ -2,7 +2,7 @@
  * @FileDescription: 本地历史消息工具（Tauri 平台）
  * @Description:
  *   封装对 Tauri 后端 db_* 命令的调用，提供类型安全的本地 SQLite 历史消息读写接口。
- *   非 Tauri 平台调用时会静默 no-op / 返回空数组，不影响其他平台逻辑。
+ *   数据库在 Tauri 桌面端始终启用。
  */
 
 import { backend } from '@renderer/runtime/backend'
@@ -10,6 +10,7 @@ import { getMsgRawTxt } from './msgUtil'
 import { Logger } from '../base'
 import { useSettingsStore } from '@renderer/state/settings'
 import { useAuthStore } from '@renderer/state/auth'
+import type { OutgoingMessageState } from '../outgoingMessage'
 
 const logger = new Logger()
 
@@ -38,9 +39,22 @@ export interface LocalMsgRecord {
     revoked: boolean
 }
 
-function isTauriHistoryAvailable(): boolean {
-    const settingsStore = useSettingsStore()
-    return backend.type === 'tauri' && settingsStore.sysConfig.enable_local_history === true
+export interface LocalOutgoingRecord {
+    client_id: string
+    chat_id: number
+    chat_type: string
+    source_group_id: number | null
+    sender_id: number
+    sender_name: string | null
+    time: number
+    message: string
+    payload: string
+    raw_message: string | null
+    state: OutgoingMessageState
+    server_message_id: string | null
+    error: string | null
+    retry_count: number
+    echo: string
 }
 
 async function callDbRecordList(
@@ -49,7 +63,6 @@ async function callDbRecordList(
     payload: Record<string, any>,
     errorTag: string,
 ): Promise<any[]> {
-    if (!isTauriHistoryAvailable()) return []
     try {
         const records: LocalMsgRecord[] = await backend.call(
             undefined,
@@ -71,7 +84,6 @@ async function callDb(
     fallback: any,
     errorTag: string,
 ): Promise<any> {
-    if (!isTauriHistoryAvailable()) return fallback
     try {
         return await backend.call(
             undefined,
@@ -156,9 +168,7 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
     if (chatId == null) return null
 
     const chatType: string =
-        msg.message_type === 'group' || msg.infoList.group_id != null
-            ? 'group'
-            : 'private'
+        msg.message_type === 'group' || msg.infoList.group_id != null? 'group': 'private'
     const senderId: number = msg.infoList.sender
     if (senderId == null) return null
 
@@ -190,9 +200,7 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
  * @param selfId  当前登录账号 uin
  * @param msgs    已完成预处理的消息对象数组（来自 chatStore.messageList 或 newMsg）
  */
-export async function dbSaveMessages(selfId: string | number, msgs: any[]): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
-
+export async function dbSaveMessages(selfId: string | number, msgs: any[]): Promise<boolean> {
     const persistableMsgs = ensureChatIdOnMsgs(selfId, msgs)
     const records: LocalMsgRecord[] = persistableMsgs
         .map(msgToRecord)
@@ -200,31 +208,150 @@ export async function dbSaveMessages(selfId: string | number, msgs: any[]): Prom
 
     if (records.length === 0) {
         logger.error(null, '[LocalHistory] dbSaveMessages: 没有有效消息可保存')
-        return
+        return false
     }
 
     try {
-        await backend.call(undefined, 'db:saveMessages', true, {
+        const saved = await backend.call(undefined, 'db:saveMessages', true, {
             selfId: String(selfId),
             messages: records,
         })
+        return Number(saved) > 0
     } catch (e) {
         logger.error(e as unknown as Error, '[LocalHistory] dbSaveMessages 失败')
+        return false
     }
 }
 
-export async function saveMessagesWithSideEffects(selfId: string | number, msgs: any[]): Promise<void> {
+export async function saveMessagesWithSideEffects(
+    selfId: string | number,
+    msgs: any[],
+): Promise<boolean> {
     const settingsStore = useSettingsStore()
     const persistableMsgs = ensureChatIdOnMsgs(selfId, msgs)
-    await dbSaveMessages(selfId, persistableMsgs)
-    if (settingsStore.sysConfig.disable_local_history_image_cache === true) return
+    const saved = await dbSaveMessages(selfId, persistableMsgs)
+    if (!saved) return false
+    if (settingsStore.sysConfig.disable_local_history_image_cache === true) return true
     cacheImagesFromMsgs(selfId, persistableMsgs).catch(() => {})
+    return true
+}
+
+function outgoingToRecord(message: any, echo = 'sendMsgBack'): LocalOutgoingRecord | null {
+    const clientId = String(message.client_id ?? message.fake_message_id ?? '')
+    const chatId = Number(message.infoList?.group_id ?? message.infoList?.target_id)
+    const senderId = Number(message.infoList?.sender ?? message.sender?.user_id)
+    if (!clientId || !Number.isFinite(chatId) || !Number.isFinite(senderId)) return null
+
+    return {
+        client_id: clientId,
+        chat_id: chatId,
+        chat_type: message.message_type === 'group' ? 'group' : 'private',
+        source_group_id: message.source_group_id != null ? Number(message.source_group_id) : null,
+        sender_id: senderId,
+        sender_name: message.sender?.card || message.sender?.nickname || null,
+        time: Number(message.time),
+        message: serializeMsgSegments(message.message),
+        payload: JSON.stringify(message.outgoing_payload ?? message.message),
+        raw_message: computeRawMessage(message),
+        state: message.outgoing_state ?? 'pending',
+        server_message_id: message.server_message_id != null? String(message.server_message_id): null,
+        error: message.outgoing_error ?? null,
+        retry_count: Number(message.retry_count ?? 0),
+        echo,
+    }
+}
+
+/** 先于网络请求持久化发送意图。 */
+export async function dbSaveOutgoing(
+    selfId: string | number,
+    message: any,
+    echo = 'sendMsgBack',
+): Promise<boolean> {
+    const outgoing = outgoingToRecord(message, echo)
+    if (!outgoing) return false
+    return Boolean(await callDb(
+        selfId,
+        'db:saveOutgoing',
+        { outgoing },
+        false,
+        '[LocalHistory] dbSaveOutgoing 失败',
+    ))
+}
+
+export async function dbUpdateOutgoingState(
+    selfId: string | number,
+    clientId: string,
+    sendState: OutgoingMessageState,
+    options: {
+        serverMessageId?: string | number
+        error?: string
+        incrementRetry?: boolean
+    } = {},
+): Promise<boolean> {
+    return Boolean(await callDb(
+        selfId,
+        'db:updateOutgoingState',
+        {
+            clientId,
+            sendState,
+            serverMessageId: options.serverMessageId != null? String(options.serverMessageId): undefined,
+            error: options.error,
+            incrementRetry: options.incrementRetry,
+        },
+        false,
+        '[LocalHistory] dbUpdateOutgoingState 失败',
+    ))
+}
+
+export async function dbDeleteOutgoing(
+    selfId: string | number,
+    clientId: string,
+): Promise<boolean> {
+    return Boolean(await callDb(
+        selfId,
+        'db:deleteOutgoing',
+        { clientId },
+        false,
+        '[LocalHistory] dbDeleteOutgoing 失败',
+    ))
+}
+
+export async function dbMarkSendingUncertain(
+    selfId: string | number,
+    error: string,
+): Promise<number> {
+    return Number(await callDb(
+        selfId,
+        'db:markSendingUncertain',
+        { error },
+        0,
+        '[LocalHistory] dbMarkSendingUncertain 失败',
+    ))
+}
+
+export async function dbGetOutgoing(
+    selfId: string | number,
+    chatId?: number,
+    states?: OutgoingMessageState[],
+): Promise<any[]> {
+    try {
+        const records: LocalOutgoingRecord[] = await backend.call(
+            undefined,
+            'db:getOutgoing',
+            true,
+            { selfId: String(selfId), chatId, states },
+        )
+        return (records ?? []).map(deserializeOutgoingRecord)
+    } catch (e) {
+        logger.error(e as unknown as Error, '[LocalHistory] dbGetOutgoing 失败')
+        return []
+    }
 }
 
 /**
  * 获取某会话最新 n 条本地消息（正序，revoked 消息不包含）。
  *
- * @returns 消息段数组已反序列化的消息对象数组，出错或非 Tauri 返回空数组
+ * @returns 消息段数组已反序列化的消息对象数组，出错时返回空数组
  */
 export async function dbGetLatest(
     selfId: string | number,
@@ -302,14 +429,14 @@ export async function dbRevokeMessage(
 /**
  * 在指定会话的本地 DB 中按关键词搜索消息（对 raw_message 做 LIKE 匹配）。
  *
- * @returns 匹配消息列表（正序），出错或非 Tauri 返回空数组
+ * @returns 匹配消息列表（正序），出错时返回空数组
  */
 export async function dbSearchMessages(
     selfId: string | number,
     chatId: number,
     query: string,
 ): Promise<any[]> {
-    if (!isTauriHistoryAvailable() || !query) return []
+    if (!query) return []
     return callDbRecordList(selfId, 'db:searchMessages', { chatId, query }, '[LocalHistory] dbSearchMessages 失败')
 }
 
@@ -317,6 +444,29 @@ export async function dbGetStats(
     selfId: string | number,
 ): Promise<{ totalMessages: number; imageCount: number; imageCacheBytes: number; dbSizeBytes: number } | null> {
     return callDb(selfId, 'db:getStats', {}, null, '[LocalHistory] dbGetStats 失败')
+}
+
+export interface DbRebuildResult {
+    backupDirectory: string | null
+    movedFiles: number
+}
+
+/**
+ * 关闭 SQLite 连接并备份主库及事务日志文件。
+ * 此命令不依赖数据库能够正常打开，可用于恢复不兼容的旧数据库。
+ */
+export async function dbRebuild(): Promise<DbRebuildResult | null> {
+    try {
+        const result = await backend.call(undefined, 'db:rebuild', true)
+        if (!result || typeof result.movedFiles !== 'number') return null
+        return {
+            backupDirectory: result.backupDirectory ?? null,
+            movedFiles: result.movedFiles,
+        }
+    } catch (e) {
+        logger.error(e as unknown as Error, '[LocalHistory] dbRebuild 失败')
+        return null
+    }
 }
 
 /**
@@ -340,8 +490,6 @@ export async function dbCacheImage(
     mimeType: string,
     data: string,
 ): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
-
     try {
         await backend.call(undefined, 'db:cacheImage', true, {
             selfId: String(selfId),
@@ -384,12 +532,8 @@ export async function dbClearImages(
     selfId: string | number,
     onProgress?: (progress: DbClearImagesProgress) => void,
 ): Promise<DbClearImagesResult> {
-    if (!isTauriHistoryAvailable()) {
-        return { total: 0, deleted: 0, batches: 0 }
-    }
-
     let unlisten: undefined | (() => void | Promise<void>)
-    if (onProgress && backend.type === 'tauri') {
+    if (onProgress) {
         const { listen } = await import('@tauri-apps/api/event')
         unlisten = await listen<DbClearImagesProgress>('db:clearImagesProgress', (event) => {
             const payload = event.payload
@@ -424,7 +568,6 @@ export async function dbClearImages(
  * 已缓存的图片（url_hash 命中）不会重复下载。
  */
 async function cacheImagesFromMsgs(selfId: string | number, msgs: any[]): Promise<void> {
-    if (!isTauriHistoryAvailable()) return
     const urls = extractImageUrlsFromMsgs(msgs)
     for (const url of urls) {
         try {
@@ -511,6 +654,49 @@ function deserializeRecord(record: LocalMsgRecord): any {
         // 消息序列号（并非所有 Bot 都提供，可为 null）
         ...(record.seq != null ? { message_seq: record.seq, seq_id: record.seq } : {}),
         // 标记来源为本地缓存，业务层可按需用此字段区分
+        _from_local_db: true,
+    }
+}
+
+function deserializeOutgoingRecord(record: LocalOutgoingRecord): any {
+    const isGroup = record.chat_type === 'group'
+    return {
+        post_type: 'message_sent',
+        message_id: record.client_id,
+        fake_message_id: record.client_id,
+        client_id: record.client_id,
+        fake_msg: true,
+        revoke: true,
+        outgoing_state: record.state,
+        outgoing_error: record.error ?? undefined,
+        server_message_id: record.server_message_id ?? undefined,
+        retry_count: record.retry_count,
+        echo: record.echo,
+        source_group_id: record.source_group_id ?? undefined,
+        message_type: isGroup ? 'group' : 'private',
+        ...(isGroup ? { group_id: record.chat_id } : { user_id: record.chat_id }),
+        sender: {
+            user_id: record.sender_id,
+            card: isGroup ? record.sender_name ?? '' : '',
+            nickname: record.sender_name ?? '',
+        },
+        time: record.time,
+        message: deserializeMsgSegments(record.message),
+        outgoing_payload: (() => {
+            try {
+                return JSON.parse(record.payload)
+            } catch {
+                return deserializeMsgSegments(record.message)
+            }
+        })(),
+        infoList: {
+            message_id: record.client_id,
+            private_id: isGroup ? undefined : record.chat_id,
+            group_id: isGroup ? record.chat_id : undefined,
+            target_id: isGroup ? undefined : record.chat_id,
+            sender: record.sender_id,
+        },
+        raw_message: record.raw_message ?? '',
         _from_local_db: true,
     }
 }

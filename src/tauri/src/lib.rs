@@ -1,3 +1,6 @@
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+compile_error!("Stapxs QQ Lite 2.0 only supports Windows, macOS, and Linux");
+
 mod commands;
 
 use commands::db::DbState;
@@ -39,6 +42,7 @@ pub fn run() {
     // 初始化 Tauri 应用程序 ============
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let store =
                 StoreBuilder::new(app, ".settings.dat").build().map_err(|e| e.to_string())?;
@@ -85,13 +89,8 @@ pub fn run() {
                 .expect("无法获取 app data 目录");
             info!("应用数据目录: {:?}", data_dir);
 
-            // 按开关初始化 SQLite：关闭本地历史时跳过数据库和密钥初始化
-            let enable_local_history = store
-                .get("enable_local_history")
-                .map(|v| v.as_bool().unwrap_or_else(|| v.as_str() == Some("true")))
-                .unwrap_or(true);
-
-            app.manage(DbState::new(data_dir, enable_local_history));
+            // SQLite 本地消息数据库始终启用，连接仍按首次读写懒加载。
+            app.manage(DbState::new(data_dir));
 
             // 初始化全局通知管理器 ============
             let app_id = app.config().identifier.clone();
@@ -255,7 +254,13 @@ pub fn run() {
             commands::opt::opt_get_all,
             commands::opt::opt_get,
             commands::opt::opt_clear_all,
+            commands::db::db_rebuild,
             commands::db::db_save_messages,
+            commands::db::db_save_outgoing,
+            commands::db::db_update_outgoing_state,
+            commands::db::db_get_outgoing,
+            commands::db::db_delete_outgoing,
+            commands::db::db_mark_sending_uncertain,
             commands::db::db_get_latest,
             commands::db::db_get_recent_sessions,
             commands::db::db_get_before,
@@ -267,7 +272,6 @@ pub fn run() {
             commands::db::db_cache_image,
             commands::db::db_get_image,
             commands::db::db_clear_images,
-            commands::db::db_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -696,30 +696,16 @@
                             // 发起获取历史消息请求
                             const type = chatStore.chatInfo.show.type
                             const id = chatStore.chatInfo.show.id
-                            let name
-                            const fullPage =
-                                authStore.jsonMap.message_list
-                                    ?.pagerType == 'full'
-                            if (
-                                authStore.jsonMap.message_list &&
-                                type != 'group'
-                            ) {
-                                name =
-                                    authStore.jsonMap.message_list
-                                        .private_name
-                            } else {
-                                name = authStore.jsonMap.message_list.name
-                            }
+                            const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
                             Connector.send(
-                                name ?? 'get_chat_history',
+                                name,
                                 {
                                     group_id:
                                         type == 'group' ? id : undefined,
                                     user_id:
                                         type != 'group' ? id : undefined,
                                     message_id: firstMsgId,
-                                    count: fullPage? chatStore.messageList.length +
-                                          20: 20,
+                                    count: 20,
                                 },
                                 'getChatHistory',
                             )

@@ -15,23 +15,6 @@ export function delay(ms: number): Promise<void> {
 }
 
 /**
- * 区分安卓、iOS、MacOS 和其他
- */
-export function getDeviceType() {
-    const userAgent = navigator.userAgent
-    if (userAgent.indexOf('Android') > -1 || userAgent.indexOf('Adr') > -1) {
-        return 'Android'
-        // eslint-disable-next-line
-    } else if (!!userAgent.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/)) {
-        return 'iOS'
-    } else if (userAgent.indexOf('Mac OS X') > -1) {
-        return 'MacOS'
-    } else {
-        return 'Other'
-    }
-}
-
-/**
  * 获取当前启用的语言的地区代码
  * @returns 符合规范的地区代码
  */
@@ -583,11 +566,7 @@ export async function getApi(url: string) {
         }
     } catch (error) {
         new Logger().error(error as Error, '前端请求 API 失败，尝试后端请求……')
-        if(!backend.isWeb()) {
-            return await backend.call('Onebot', 'sys:getApi', true, url)
-        } else {
-            return null
-        }
+        return await backend.call(undefined, 'sys:getApi', true, url)
     }
 }
 
@@ -611,5 +590,3 @@ export async function copyToClipboard(content: ClipboardItem[] | string) {
     else
         await window.navigator.clipboard.write(content)
 }
-
-

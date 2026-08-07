@@ -2,7 +2,7 @@ name: check
 on:
     pull_request: # PR 触发
         branches:
-            - next
+            - 2.0
 
 jobs:
     check:
@@ -38,6 +38,9 @@ jobs:
             # 代码检查
             - name: 前端代码检查
               run: yarn check
+
+            - name: 自动更新清单测试
+              run: yarn test:updater
 
             - name: Tauri 代码检查
               run: yarn lint:tauri

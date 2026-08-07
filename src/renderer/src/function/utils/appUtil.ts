@@ -1,16 +1,13 @@
 import app from '@renderer/main'
-import FileDownloader from 'js-file-downloader'
 import option from '@renderer/function/option'
-import semver from 'semver'
-import appInfo from '../../../../../package.json'
 import Umami from '@stapxs/umami-logger-typescript'
+import type { DownloadEvent, Update } from '@tauri-apps/plugin-updater'
 
 import AboutPan from '@renderer/components/AboutPan.vue'
 import UpdatePan from '@renderer/components/UpdatePan.vue'
 import WelPan from '@renderer/components/WelPan.vue'
 import MealHungryPan from '@renderer/components/notice-component/MealHungryPan.vue'
 
-import { KeyboardInfo } from '@capacitor/keyboard'
 import { LogType, Logger, PopInfo, PopType } from '@renderer/function/base'
 import { Connector, login } from '@renderer/function/connect'
 import { BaseChatInfoElem, MenuEventData } from '@renderer/function/elements/information'
@@ -42,14 +39,23 @@ import {
     DirectiveBinding,
     Ref,
 } from 'vue'
-import { sendMsgRaw } from './msgUtil'
-import { dbGetLatest } from './localHistoryUtil'
+import { markSendingOutgoingUncertain, sendMsgRaw } from './msgUtil'
+import { dbGetLatest, dbGetOutgoing } from './localHistoryUtil'
 import { parseMsg } from '../sender'
 import { Notify } from '../notify'
 import { mergeConversationMessages } from '../outgoingMessage'
+import { backend } from '@renderer/runtime/backend'
 
 const popInfo = new PopInfo()
 const logger = new Logger()
+const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000
+const UPDATE_RETRY_INTERVAL = 30 * 60 * 1000
+const UPDATE_TIMER_INTERVAL = 30 * 60 * 1000
+const UPDATE_NEXT_CHECK_KEY = 'updater_next_check_at'
+const RELEASE_PAGE = 'https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases/latest'
+let updateCheckInFlight: Promise<boolean> | undefined
+let updateCheckTimer: number | undefined
+let updaterInstallInProgress = false
 
 /**
  * 滚动到目标消息（不自动加载）
@@ -89,17 +95,7 @@ export function scrollToMsg(seqName: string, showAnimation: boolean, showHighlig
  * @param external 是否外部打开
  */
 export function openLink(url: string) {
-    // 判断是不是 Electron，是的话打开内嵌 iframe
-    if (backend.isDesktop()) {
-        const shell = window.electron?.shell
-        if (shell) {
-            shell.openExternal(url)
-        } else {
-            backend.call('', 'sys:openInBrowser', false, backend.unProxyUrl(url))
-        }
-    } else {
-        window.open(url)
-    }
+    backend.call(undefined, 'sys:openInBrowser', false, backend.unProxyUrl(url))
 }
 
 /**
@@ -111,18 +107,19 @@ export async function loadHistory(info: BaseChatInfoElem) {
     const chatStore = useChatStore()
     const settingsStore = useSettingsStore()
     chatStore.messageList = []
-    // 在 SQLite 查询期间保留快照；即使发送确认同时完成，也不会出现切换闪空。
-    const pendingMsgs = [...chatStore.pendingOutgoingMessages.values()]
-        .filter((item) => item.chatId === Number(info.id))
-        .map((item) => item.message)
+    // 发件箱本身也在 SQLite 中；切换会话或重启后都从持久化状态恢复。
+    const pendingMsgs = await dbGetOutgoing(authStore.loginInfo.uin, Number(info.id))
+    pendingMsgs.forEach((message) => {
+        chatStore.pendingOutgoingMessages.set(String(message.client_id), {
+            chatId: Number(info.id),
+            message,
+        })
+    })
     // 后台预取可能一次包含大量、复杂的消息段。不要在点击会话时同步灌入聊天组件，
     // 否则其中任一异常消息或集中预处理都可能阻断聊天视图挂载。
     // 当前会话仍走下方经过验证的本地最新消息 + OneBot 实时请求链路。
     // 本地有数据时立即显示，同时仍发网络请求以获取最新消息（避免遗漏）
-    if (
-        settingsStore.sysConfig.enable_local_history &&
-        settingsStore.sysConfig.mixed_load_messages !== false
-    ) {
+    if (settingsStore.sysConfig.mixed_load_messages !== false) {
         const localMsgs = await dbGetLatest(
             authStore.loginInfo.uin,
             info.id,
@@ -147,23 +144,15 @@ export function loadHistoryMessage(
     count = 20,
     echo = 'getChatHistoryFist',
 ) {
-    const authStore = useAuthStore()
-    const chatStore = useChatStore()
-    let name: string
-    const fullPage = authStore.jsonMap.message_list?.pagerType == 'full'
-    if (authStore.jsonMap.message_list && type != 'group') {
-        name = authStore.jsonMap.message_list.private_name
-    } else {
-        name = authStore.jsonMap.message_list.name
-    }
+    const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
 
     Connector.send(
-        name ?? 'get_chat_history',
+        name,
         {
             group_id: type == 'group' ? id : undefined,
             user_id: type != 'group' ? id : undefined,
             message_id: 0,
-            count: fullPage ? chatStore.messageList.length + count : count,
+            count,
         },
         echo,
     )
@@ -176,23 +165,10 @@ export function loadHistoryMessage(
 export function reloadUsers() {
     // 加载用户列表
     if (login.status) {
-        const authStore = useAuthStore()
         const contactStore = useContactStore()
         contactStore.userList = []
-        let friendName = 'get_friend_list'
-        let groupName = 'get_group_list'
-        if (authStore.jsonMap?.user_list?.name) {
-            friendName = authStore.jsonMap.user_list.name.split('|')[0]
-            groupName = authStore.jsonMap.user_list.name.split('|')[1]
-        } else if (
-            authStore.jsonMap?.friend_list?.name &&
-            authStore.jsonMap?.group_list?.name
-        ) {
-            friendName = authStore.jsonMap.friend_list.name
-            groupName = authStore.jsonMap.group_list.name
-        }
-        Connector.send(friendName, {}, 'getFriendList')
-        Connector.send(groupName, {}, 'getGroupList')
+        Connector.send('get_friend_list', {}, 'getFriendList')
+        Connector.send('get_group_list', {}, 'getGroupList')
     }
 }
 
@@ -270,39 +246,21 @@ export function downloadFile(
             url = 'https' + url.substring(url.indexOf('://'))
         }
     }
-    if (backend.isWeb()) {
-        try {
-            new FileDownloader({
-                url: url,
-                autoStart: true,
-                process: onprocess,
-                nameCallback: function () {
-                    return name
-                },
-            })
-        } catch (e) {
-            logger.error(e as Error, '下载文件失败')
-        }
-        return () => {} // Web 平台不需要清理
-    } else {
-        // 创建命名回调函数以便后续移除
-        const processCallback = (event: any, data: any) => {
-            onprocess(data || event.payload)
-        }
-        const cancelCallback = (event: any, data: any) => {
-            oncancel(data || event.payload)
-        }
-        backend.addListener(undefined, 'sys:downloadBack', processCallback)
-        backend.addListener(undefined, 'sys:downloadCancel', cancelCallback)
-        backend.call(undefined, 'sys:download', false, {
-            downloadPath: url,
-            fileName: name,
-        })
-        // 返回清理函数
-        return () => {
-            backend.removeListener(undefined, 'sys:downloadBack', processCallback)
-            backend.removeListener(undefined, 'sys:downloadCancel', cancelCallback)
-        }
+    const processCallback = (event: any, data: any) => {
+        onprocess(data || event.payload)
+    }
+    const cancelCallback = (event: any, data: any) => {
+        oncancel(data || event.payload)
+    }
+    backend.addListener(undefined, 'sys:downloadBack', processCallback)
+    backend.addListener(undefined, 'sys:downloadCancel', cancelCallback)
+    backend.call(undefined, 'sys:download', false, {
+        downloadPath: url,
+        fileName: name,
+    })
+    return () => {
+        backend.removeListener(undefined, 'sys:downloadBack', processCallback)
+        backend.removeListener(undefined, 'sys:downloadCancel', cancelCallback)
     }
 }
 
@@ -351,12 +309,8 @@ export function updateWinColor(color: string, type: string) {
     }
 }
 export async function loadWinColor() {
-    const process = window.electron?.process
-    let type = 'macos'
-    if (process && process.platform == 'win32') {
-        type = 'windows'
-    }
     // 获取系统主题色
+    const type = backend.platform === 'win32' ? 'windows' : 'macos'
     updateWinColor(await backend.call(undefined, 'sys:getWinColor', true), type)
 }
 
@@ -366,9 +320,7 @@ export async function loadWinColor() {
 export function createMenu() {
     const { $t } = app.config.globalProperties
     const contactStore = useContactStore()
-    // MacOS：初始化菜单
-    if (backend.isDesktop()) {
-        // 初始化菜单
+    // 初始化 Tauri 桌面菜单
         const menuTitles = {} as { [key: string]: string }
         menuTitles.success = $t(
             '应用显示完成，应用初始化完成！欢迎使用 {name}！',
@@ -410,9 +362,7 @@ export function createMenu() {
         menuTitles.feedback = $t('在 Github 上反馈问题')
         menuTitles.license = $t('许可协议')
 
-        backend.call(undefined, 'sys:createMenu', false,
-            backend.type == 'tauri' ? { data: menuTitles } : menuTitles)
-    }
+    backend.call(undefined, 'sys:createMenu', false, { data: menuTitles })
 }
 export function updateMenu(config: { parent: string, id: string; action: string; value: string }) {
     // MacOS：更新菜单
@@ -420,7 +370,7 @@ export function updateMenu(config: { parent: string, id: string; action: string;
 }
 
 /**
-* Electron：注册系统 IPC
+* 注册 Tauri 系统事件
 */
 export function createIpc() {
     const contactStore = useContactStore()
@@ -500,175 +450,11 @@ export function createIpc() {
     })
     backend.addListener(undefined, 'onebot:onclose', (event, data) => {
         const info = data ?? event.payload
+        void markSendingOutgoingUncertain('连接中断，发送结果未知')
         Connector.onclose(info.code, info.reason || info.message, info.address, info.token)
     })
 }
 
-/**
-* Capacitor：初始化移动平台
-*/
-export async function loadMobile() {
-    const { $t } = app.config.globalProperties
-    // Capacitor：相关初始化
-    if (backend.isMobile()) {
-        // 注册回调监听
-        backend.addListener('Onebot', 'onebot:event', (data) => {
-            const msg = JSON.parse(data.data)
-            switch (data.type) {
-                case 'onopen': {
-                    login.creating = false
-                    Connector.onopen(login.address, login.token)
-                    break
-                }
-                case 'onmessage': Connector.onmessage(data.data); break
-                case 'onclose': {
-                    login.creating = false
-                    Connector.onclose(msg.code, msg.message, login.address, login.token)
-                    break
-                }
-                case 'onerror': {
-                    login.creating = false
-                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + msg.type, false);
-                    break
-                }
-                case 'onServiceFound': setQuickLogin(msg.address, msg.port); break
-                default: break
-            }
-        })
-        // initial-scale 缩放固定为 0.9
-        const viewport = document.getElementById('viewport')
-        if (viewport) {
-            (viewport as any).content =
-                'width=device-width, initial-scale=0.9, maximum-scale=5, user-scalable=0'
-        }
-        // 通知
-        const permission = await backend.call('LocalNotifications', 'checkPermissions', true)
-        const permissionStr = permission || permission.display
-        if (permissionStr.indexOf('prompt') != -1) {
-            await backend.call('LocalNotifications', 'requestPermissions', false)
-        } else if (permissionStr.indexOf('denied') != -1) {
-            logger.error(null, '通知权限已被拒绝')
-            logger.system('开发者阁下为什么要拒绝通知权限的请求呢？')
-        } else {
-            logger.debug('通知权限已开启')
-            // 注册通知类型
-            backend.call('LocalNotifications', 'registerActionTypes', false, {
-                types: [{
-                    id: 'msgQuickReply',
-                    actions: [{
-                        id: 'REPLY_ACTION',
-                        title: '快速回复',
-                        requiresAuthentication: true,
-                        input: true,
-                        inputButtonTitle: '发送',
-                        inputPlaceholder: '输入回复内容……'
-                    }]
-                }] as ActionType[]
-            })
-            // 注册相关事件
-            backend.addListener('LocalNotifications', 'localNotificationActionPerformed', (info) => {
-                const contactStore = useContactStore()
-                const notification =
-                    info.notification as LocalNotificationSchema
-                if (info.actionId == 'tap') {
-                    // PS：通知被点击后会自动被关闭，所以这里不需要处理
-                    jumpToChat(notification.extra.userId,
-                        notification.extra.msgId)
-                } else if (info.actionId == 'REPLY_ACTION') {
-                    // 快速回复
-                    sendMsgRaw(
-                        notification.extra.userId,
-                        notification.extra.chatType,
-                        parseMsg(info.inputValue ?? '', [{ type: 'reply', id: String(notification.extra.msgId) }], []),
-                        true
-                    )
-                    // 去消息列表内寻找，去除新消息标记
-                    const item = contactStore.baseOnMsgList.get(Number(notification.extra.userId))
-                    if (item) {
-                        if (item.new_msg) {
-                            item.new_msg = false
-                            contactStore.newMsgCount--
-                        }
-                        item.highlight = undefined
-                        contactStore.baseOnMsgList.set(Number(notification.extra.userId), item)
-                    }
-                }
-            })
-        }
-        // 键盘
-        backend.call('Keyboard', 'setAccessoryBarVisible', false, { isVisible: false })
-        backend.call('Keyboard', 'setResizeMode', false, { mode: 'none' })
-        backend.addListener('Keyboard', 'keyboardWillShow', async (info: KeyboardInfo) => {
-            const keyboardHeight = info.keyboardHeight
-
-            console.log('键盘高度：', keyboardHeight)
-
-            // 调整输入框高度
-            const sendMore = document.getElementById('send-more')
-            if (sendMore && keyboardHeight > window.innerHeight / 3) {
-                sendMore.style.paddingBottom = '10px'
-            }
-
-            const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-            const tabBar = document.getElementsByTagName('ul')[0]
-            // iOS 26 后键盘背景是半透明的，不能让 webview 调整高度，会漏出背景的黑色
-            // 干脆把所有的 iOS 版本处理方法都改为内部避让
-            if (backend.platform == 'ios') {
-                const baseApp = document.getElementById('base-app')
-                // 使用键盘高度减去底部安全区域，不添加额外偏移量
-                // 避免硬编码的 +100 导致 WebView 定位错误，引发键盘焦点丢失
-                const keyboardOffset = Math.max(0, keyboardHeight - safeArea.bottom)
-                if (safeArea && baseApp) {
-                    baseApp.style.setProperty('--safe-area-bottom', keyboardOffset + 'px')
-                }
-                // 调整菜单高度
-                if (safeArea && tabBar) {
-                    tabBar.style.setProperty('padding-bottom', keyboardOffset + 'px', 'important')
-                }
-            }
-
-            // 调整整个 HTML 的高度
-            // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
-            // const html = document.getElementsByTagName('html')[0]
-            // if (html && backend.platform == 'android') {
-            //     html.style.height = `calc(100% - ${keyboardHeight + safeArea.top}px)`
-            // }
-        })
-        backend.addListener('Keyboard', 'keyboardWillHide', async () => {
-            const sendMore = document.getElementById('send-more')
-            if (sendMore) {
-                sendMore.style.paddingBottom = 'var(--safe-area-bottom)'
-            }
-            if (backend.platform == 'ios') {
-                const baseApp = document.getElementById('base-app')
-                const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-                if (safeArea && baseApp) {
-                    baseApp.style.setProperty('--safe-area-bottom', safeArea.bottom + 'px')
-                }
-
-                const tabBar = document.getElementsByTagName('ul')[0]
-                if (tabBar) {
-                    tabBar.style.paddingBottom = ''
-                }
-            }
-            // 调整整个 HTML 的高度
-            // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
-            const html = document.getElementsByTagName('html')[0]
-            if (html && backend.platform == 'android') {
-                html.style.height = 'calc(100%)'
-            }
-        })
-        // 状态栏（Android）
-        backend.call('NavigationBar', 'setTransparency', false, { isTransparent: true })
-        backend.call('StatusBar', 'setOverlaysWebView', false, { overlay: true })
-        backend.call('StatusBar', 'setBackgroundColor', false, { color: '#ffffff00' })
-    }
-}
-
-import horizontalCss from '@renderer/assets/css/append/mobile/append_mobile_horizontal.css?raw'
-import verticalCss from '@renderer/assets/css/append/mobile/append_mobile_vertical.css?raw'
-import { ActionType, LocalNotificationSchema } from '@capacitor/local-notifications'
-import { backend } from '@renderer/runtime/backend'
 import { NoticeBodyV3 } from '../elements/system'
 import { wheelMask } from '../input'
 import { addTooltip, TooltipController } from '../tooltip'
@@ -690,45 +476,10 @@ export async function loadAppendStyle() {
             })
     }
 
-    // 添加手机端样式
-    const updateCss = (appendCss = '') => {
-        const cssStype = document.getElementById('mobile-css')
-
-        const width = window.innerWidth
-        const height = window.innerHeight
-        if (cssStype) {
-            if (width > 600) {
-                cssStype.innerHTML = (width > height ? horizontalCss : (horizontalCss + verticalCss)) + appendCss
-            } else {
-                cssStype.innerHTML = horizontalCss + verticalCss + appendCss
-            }
-        }
-
-        if (backend.isDesktop()) {
-            backend.call(undefined, 'win:maximize', false)
-            const topBar = document.getElementsByClassName('top-bar')[0] as HTMLElement
-            if (topBar) {
-                topBar.style.display = 'none'
-            }
-        }
-    }
-    if (backend.isMobile()) {
-        const styleTag = document.createElement('style')
-        styleTag.id = 'mobile-css'
-        document.head.appendChild(styleTag)
-        updateCss()
-        // 屏幕旋转事件处理
-        window.addEventListener('resize', () => {
-            updateCss()
-        })
-    }
-
     // UI 2.0 附加样式
-    if (backend.isDesktop()) {
-        import('@renderer/assets/css/append/append_new.css').then(() => {
-            logger.info('UI 2.0 附加样式加载完成')
-        })
-    }
+    import('@renderer/assets/css/append/append_new.css').then(() => {
+        logger.info('UI 2.0 附加样式加载完成')
+    })
 
     if (option.get('chat_more_blur')) {
         import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
@@ -736,26 +487,15 @@ export async function loadAppendStyle() {
         })
     }
 
-    // napcat 插件模式附加样式
-    if (import.meta.env.VITE_NAPCAT) {
-        import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
-            logger.info('完全透明 UI 附加样式加载完成')
-        })
-        import('@renderer/assets/css/append/append_napcat.css').then(() => {
-            logger.info('napcat 插件模式附加样式加载完成')
-        })
-    }
-
     // 透明 UI 附加样式
     let subVersion = backend.release?.split(' ')?.[1]?.split('.') as any
     subVersion = subVersion ? Number(subVersion[2]) : 0
-    if (backend.isDesktop() &&
-        (platform == 'darwin' || (platform == 'win32' && subVersion > 22621))) {
+    if (platform == 'darwin' || (platform == 'win32' && subVersion > 22621)) {
         import('@renderer/assets/css/append/append_vibrancy.css').then(() => {
             logger.info('透明 UI 附加样式加载完成')
         })
     }
-    if (backend.isDesktop() && platform == 'linux') {
+    if (platform == 'linux') {
         const gnomeExtInfo = await backend.call(undefined, 'sys:getGnomeExt', true)
         if (gnomeExtInfo) {
             gnomeExtInfo.then((info: any) => {
@@ -790,158 +530,161 @@ function setQuickLogin(address: string, port: number) {
         login.quickLogin.push({ address: address, port: port })
 }
 
-/**
-* 检查更新
-*/
-export async function checkUpdate(manual = false) {
+/** 启动时立即尝试检查，并为长期运行的客户端保留周期检查。 */
+export function startUpdateChecks() {
+    if (updateCheckTimer !== undefined) return
+    void checkUpdate()
+    updateCheckTimer = window.setInterval(() => {
+        void checkUpdate()
+    }, UPDATE_TIMER_INTERVAL)
+    window.addEventListener('online', () => void checkUpdate())
+    window.addEventListener('focus', () => void checkUpdate())
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void checkUpdate()
+    })
+}
+
+/** 使用 Tauri Updater 的签名端点检查更新。 */
+export async function checkUpdate(manual = false): Promise<boolean> {
+    const settingsStore = useSettingsStore()
+    if (!manual && settingsStore.sysConfig.auto_check_update === false) return false
+
+    const now = Date.now()
+    const nextCheckAt = Number(localStorage.getItem(UPDATE_NEXT_CHECK_KEY) ?? 0)
+    if (!manual && Number.isFinite(nextCheckAt) && now < nextCheckAt) return false
+    if (updateCheckInFlight) return updateCheckInFlight
+
+    updateCheckInFlight = performUpdateCheck(manual).finally(() => {
+        updateCheckInFlight = undefined
+    })
+    return updateCheckInFlight
+}
+
+async function performUpdateCheck(manual: boolean): Promise<boolean> {
     const { $t } = app.config.globalProperties
-    const repoName = import.meta.env.VITE_APP_REPO_NAME
-    const packageUrl = `https://api.github.com/repos/${repoName}/releases/latest`
-    const cacheVersion = localStorage.getItem('version')
     try {
-        const response = await fetch(packageUrl, {
-            headers: { Accept: 'application/vnd.github+json' },
-        })
-        if (!response.ok) throw new Error(`GitHub API ${response.status}`)
-        const data = await response.json()
-        const hasUpdate = showUpadteLog(data, cacheVersion)
-        if (manual && !hasUpdate) {
-            new PopInfo().add(PopType.INFO, $t('当前已是最新版本'), false)
+        const { check } = await import('@tauri-apps/plugin-updater')
+        const update = await check({ timeout: 15000 })
+        localStorage.setItem(
+            UPDATE_NEXT_CHECK_KEY,
+            String(Date.now() + UPDATE_CHECK_INTERVAL),
+        )
+        if (!update) {
+            if (manual) {
+                new PopInfo().add(PopType.INFO, $t('当前已是最新版本'), false)
+            }
+            return false
         }
-        localStorage.setItem('version', appInfo.version)
+        showTauriUpdate(update)
+        return true
     } catch (e) {
-        logger.error(e as Error, '检查更新失败')
-        if (manual) {
-            new PopInfo().add(PopType.ERR, $t('检查更新失败'), false)
-        }
+        localStorage.setItem(
+            UPDATE_NEXT_CHECK_KEY,
+            String(Date.now() + UPDATE_RETRY_INTERVAL),
+        )
+        logger.error(e as Error, 'Tauri Updater 检查更新失败')
+        if (manual) showUpdaterFailure($t('检查更新失败，请稍后重试'))
+        return false
     }
 }
 
-/**
-* 展示更新弹窗
-* @param data 更新数据
-*/
-function showUpadteLog(data: any, cacheVersion: string | null) {
-    const appVersion = appInfo.version // 当前版本
-    // 这儿有两种情况：
-    //    如果当前版本小于获取到的版本就是有更新
-    //    如果缓存版本小于获取到的版本但是当前版本等于获取到的版本就是更新完成首次启动
-    const latestVersion = String(data.tag_name ?? '').replace(/^v/, '')
-    const releaseCommit = String(data.body ?? '')
-        .match(/构建提交[：:]\s*([a-f0-9]{7,40})/i)?.[1] ?? ''
-    const newerVersion = Boolean(
-        semver.valid(appVersion) &&
-        semver.valid(latestVersion) &&
-        semver.lt(appVersion, latestVersion),
-    )
-    const sameVersion = Boolean(
-        semver.valid(appVersion) &&
-        semver.valid(latestVersion) &&
-        semver.eq(appVersion, latestVersion),
-    )
-    // release.yml 会复用同一版本号更新构建产物；使用构建 SHA 识别同版本的新构建。
-    const newerBuild = Boolean(
-        sameVersion &&
-        releaseCommit &&
-        __BUILD_COMMIT__ &&
-        !releaseCommit.startsWith(__BUILD_COMMIT__) &&
-        !__BUILD_COMMIT__.startsWith(releaseCommit),
-    )
-
-    if (newerVersion || newerBuild) {
-        // 有更新
-        showReleaseLog(data, false)
-        return true
-    }
-    if (
-        cacheVersion &&
-        semver.valid(cacheVersion) &&
-        semver.valid(latestVersion) &&
-        semver.eq(appVersion, latestVersion) &&
-        semver.lt(cacheVersion, latestVersion)
-    ) {
-        // 更新完成首次启动
-        showReleaseLog(data, true)
-        return true
-    }
-    return false
-}
-
-function getReleaseDownloadUrl(data: any) {
-    const assets = Array.isArray(data.assets) ? data.assets : []
-    const arch = (backend.arch ?? '').toLowerCase()
-    let pattern: RegExp | undefined
-    if (backend.platform === 'win32') {
-        pattern = /(x64|amd64)-setup\.exe$/i
-    } else if (backend.platform === 'darwin') {
-        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.dmg$/i
-        else pattern = /_x64\.dmg$/i
-    } else if (backend.platform === 'linux') {
-        if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.AppImage$/i
-        else pattern = /_amd64\.AppImage$/i
-    }
-    const asset = pattern
-        ? assets.find((item: any) => pattern?.test(String(item.name ?? '')))
-        : undefined
-    return asset?.browser_download_url ?? data.html_url
-}
-
-function showReleaseLog(data: any, isUpdated: boolean) {
+function showTauriUpdate(update: Update) {
     const uiStore = useUIStore()
     const { $t } = app.config.globalProperties
-    const msg = String(data.body ?? '')
     const info = {
-        version:
-            (isUpdated ? localStorage.getItem('version') + ' -> ' : '') +
-            data.tag_name.substring(1),
-        date: data.published_at,
-        user: {
-            name: data.author.login,
-            avatar: data.author.avatar_url,
-            url: data.author.html_url,
-        },
-        message: msg,
-        updated: isUpdated,
+        version: `${update.currentVersion} -> ${update.version}`,
+        date: update.date,
+        message: update.body ?? '',
+        updated: false,
     }
-    const buttonGoUpdate = (!backend.isWeb()) ? [
-        {
-            text: $t('知道了'),
-            fun: () => uiStore.popBoxList.shift(),
-        },
-        {
-            text: $t('下载更新…'),
-            master: true,
-            fun: () => openLink(getReleaseDownloadUrl(data)),
-        },
-    ] : [
-        {
-            text: $t('查看…'),
-            fun: () => openLink(data.html_url),
-        },
-        {
-            text: $t('刷新页面'),
-            master: true,
-            fun: () => location.reload(),
-        },
-    ]
     const popInfo = {
         template: markRaw(UpdatePan),
         templateValue: toRaw(info),
-        button: isUpdated ? [
+        allowQuickClose: false,
+        button: [
             {
-                text: $t('查看…'),
-                fun: () => openLink(data.html_url),
-            },
-            {
-                text: $t('知道了'),
-                master: true,
+                text: $t('稍后'),
                 fun: () => {
                     uiStore.popBoxList.shift()
+                    void update.close()
                 },
             },
-        ] : buttonGoUpdate,
+            {
+                text: $t('下载并安装'),
+                master: true,
+                fun: () => {
+                    void installTauriUpdate(update)
+                },
+            },
+        ],
     }
     uiStore.popBoxList.push(popInfo)
+}
+
+async function installTauriUpdate(update: Update) {
+    if (updaterInstallInProgress) return
+    updaterInstallInProgress = true
+    const uiStore = useUIStore()
+    const { $t } = app.config.globalProperties
+    uiStore.popBoxList.shift()
+
+    let downloaded = 0
+    let total: number | undefined
+    const progressPop = {
+        title: $t('正在更新'),
+        html: `<span>${$t('正在准备下载更新…')}</span>`,
+        allowClose: false,
+    }
+    uiStore.popBoxList.push(progressPop)
+
+    const refreshProgress = (event: DownloadEvent) => {
+        if (event.event === 'Started') {
+            total = event.data.contentLength
+        } else if (event.event === 'Progress') {
+            downloaded += event.data.chunkLength
+        } else if (event.event === 'Finished') {
+            progressPop.html = `<span>${$t('下载完成，正在安装…')}</span>`
+            return
+        }
+        const downloadedMb = (downloaded / 1024 / 1024).toFixed(1)
+        const progress = total && total > 0? `${downloadedMb} / ${(total / 1024 / 1024).toFixed(1)} MB（${Math.min(100, downloaded / total * 100).toFixed(1)}%）`: `${downloadedMb} MB`
+        progressPop.html = `<span>${$t('正在下载更新')} ${progress}</span>`
+    }
+
+    try {
+        await update.downloadAndInstall(refreshProgress, { timeout: 10 * 60 * 1000 })
+        await backend.call(undefined, 'win:relaunch', false)
+    } catch (e) {
+        logger.error(e as Error, '下载或安装更新失败')
+        if (uiStore.popBoxList[0] === progressPop) uiStore.popBoxList.shift()
+        await update.close().catch(() => {})
+        showUpdaterFailure($t('更新下载或安装失败，可以稍后重试或手动下载'))
+    } finally {
+        updaterInstallInProgress = false
+    }
+}
+
+function showUpdaterFailure(message: string) {
+    const uiStore = useUIStore()
+    const { $t } = app.config.globalProperties
+    uiStore.popBoxList.push({
+        title: $t('更新失败'),
+        html: `<span>${message}</span>`,
+        button: [
+            {
+                text: $t('手动下载'),
+                fun: () => {
+                    uiStore.popBoxList.shift()
+                    openLink(RELEASE_PAGE)
+                },
+            },
+            {
+                text: $t('关闭'),
+                master: true,
+                fun: () => uiStore.popBoxList.shift(),
+            },
+        ],
+    })
 }
 
 /**
@@ -1215,69 +958,6 @@ export function BackendRequest(type: 'GET' | 'POST', url: string,
     })
 }
 
-// 未知实现（如自研的 OneBot 服务端）回退使用的映射表，需与 msg.ts 里的默认映射表保持一致
-const DEFAULT_JSON_MAP = 'Lagrange.OneBot.yaml'
-
-/**
-* 加载数据解析映射表（JSON Path）
-* @param name 配置名称
-* @returns 映射表
-*/
-export function loadJsonMap(name: string) {
-    let msgPath = undefined as { [key: string]: any } | undefined
-    if (name !== undefined) {
-        try {
-            const msgPathList = import.meta.glob(
-                '@renderer/assets/pathMap/*.yaml', { eager: true })
-            const msgPathKey = Object.keys(msgPathList).find((key) => {
-                return key.includes(name)
-            })
-            if (msgPathKey) {
-                msgPath = (msgPathList[msgPathKey] as any).default
-            }
-            if (msgPath) {
-                logger.system('开发者，请稍等一下（翻找），正在为阁下加载 ' + msgPath.name + ' 的服务映射表。')
-                if (msgPath.redirect) {
-                    // eslint-disable-next-line
-                    const newMsgPathKey = Object.keys(msgPathList).find((key) => {
-                        return key.includes(msgPath?.redirect)
-                    })
-                    let newMsgPath = undefined as
-                        { [key: string]: any } | undefined
-                    if (newMsgPathKey) {
-                        newMsgPath = (msgPathList[newMsgPathKey] as any).default
-                    }
-                    // 合并映射表
-                    Object.keys(msgPath).forEach((key) => {
-                        if (newMsgPath && key != 'name' && newMsgPath[key]) {
-                            if (msgPath)
-                                newMsgPath[key] = msgPath[key]
-                        }
-                    })
-                    msgPath = newMsgPath
-                    logger.system('非常抱歉开发者，已帮阁下将映射表重定向加载为 ：' + msgPath?.name + ' （慌张）')
-                }
-            } else {
-                // 没有对应实现的映射表时回退到默认映射表
-                // PS：不能让 jsonMap 保持 undefined，否则读取它的地方（如 reloadUsers）会直接抛错，
-                //     表现为登录成功但用户列表一直是空的
-                logger.system('开发者，没有找到你需要的映射表……将使用默认映射表。')
-                const defaultKey = Object.keys(msgPathList).find((key) => {
-                    return key.includes(DEFAULT_JSON_MAP)
-                })
-                if (defaultKey) {
-                    msgPath = (msgPathList[defaultKey] as any).default
-                }
-            }
-            const authStore = useAuthStore()
-            authStore.jsonMap = msgPath ?? {}
-        } catch (ex) {
-            logger.system('很抱歉开发者，映射表加载失败 ……' + ex)
-        }
-    }
-    return msgPath
-}
-
 /**
 * UM：上报事件
 * @param event 事件名
@@ -1375,22 +1055,7 @@ export function changeGroupNotice(group_id: number, open: boolean) {
  * @returns
  */
 export function shouldAutoFocus(): boolean {
-    // 桌面端
-    if (backend.type !== 'web') {
-        // 除了苹果的不知道啥东西,都可以
-        if (['electron', 'tauri'].includes(backend.type)) {
-            return true
-        }
-        return false
-    }
-    // web端
-    else {
-        // 移动端浏览器不自动聚焦
-        if (/Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-            return false
-        }
-        return true
-    }
+    return true
 }
 
 /**
@@ -1622,21 +1287,11 @@ export function useKeyboard(...args: [string, ...string[], () => boolean | undef
 
 
 function localStorageGetItem(key: string): string | null {
-    if (backend.type === 'electron') {
-        return backend.callSync('opt:get', key)
-    } else {
-        // eslint-disable-next-line no-restricted-globals
-        return localStorage.getItem(key)
-    }
+    return localStorage.getItem(key)
 }
 
 function localStorageSetItem(key: string, value: string): void {
-    if (backend.type === 'electron') {
-        backend.callSync('opt:store', { key, value })
-    } else {
-        // eslint-disable-next-line no-restricted-globals
-        localStorage.setItem(key, value)
-    }
+    localStorage.setItem(key, value)
 }
 
 /**
@@ -2291,7 +1946,7 @@ function resolveBinding<T extends Component>(binding: VTooltipBinding<T>, eventD
     } else if ('comp' in binding) {
         return binding
     } else {
-        return { comp: binding, props: {} } as VueCompData<T>
+        return { comp: binding, props: {} } as unknown as VueCompData<T>
     }
 }
 

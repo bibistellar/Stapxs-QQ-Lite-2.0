@@ -11,6 +11,9 @@ on:
 jobs:
     build:
         runs-on: ${{ matrix.os }}
+        env:
+            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         strategy:
             # 单个平台失败不影响其它平台继续构建、发布
             fail-fast: false
@@ -55,6 +58,9 @@ jobs:
                   profile: minimal
                   override: true
 
+            - name: 检查更新签名配置
+              run: node -e "if (!process.env.TAURI_SIGNING_PRIVATE_KEY) throw new Error('请配置 TAURI_SIGNING_PRIVATE_KEY Secret')"
+
             # Apple Silicon 运行器上同时准备两个目标，用于交叉编译 Intel 版
             - name: 添加 macOS 构建目标
               if: matrix.os == 'macos-14'
@@ -65,36 +71,53 @@ jobs:
 
             - name: 构建 Tauri 应用
               if: matrix.os == 'windows-2022'
-              run: yarn build:tauri -t x86_64-pc-windows-msvc -b nsis
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t x86_64-pc-windows-msvc -b nsis
             - name: 构建 Tauri 应用
               if: matrix.os == 'ubuntu-22.04'
-              run: yarn build:tauri -t x86_64-unknown-linux-gnu -b appimage,deb
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t x86_64-unknown-linux-gnu -b appimage,deb
             - name: 构建 Tauri 应用
               if: matrix.os == 'ubuntu-22.04-arm'
-              run: yarn build:tauri -t aarch64-unknown-linux-gnu -b appimage,deb
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t aarch64-unknown-linux-gnu -b appimage,deb
             # macOS 使用 tauri.conf.json 中的 ad-hoc 签名（signingIdentity: "-"），
             # 无需 Apple 开发者证书；未签名/未公证，用户首次打开需右键 → 打开
             - name: 构建 Tauri 应用（Apple Silicon）
               if: matrix.os == 'macos-14'
-              run: yarn build:tauri -t aarch64-apple-darwin -b dmg
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t aarch64-apple-darwin -b app,dmg
             - name: 构建 Tauri 应用（Intel，交叉编译）
               if: matrix.os == 'macos-14'
-              run: yarn build:tauri -t x86_64-apple-darwin -b dmg
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t x86_64-apple-darwin -b app,dmg
 
             - name: 准备产物目录
-              if: matrix.os != 'windows-2022'
+              if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-22.04-arm'
               run: |
                   mkdir -p upload
                   cp src/tauri/target/*/release/bundle/deb/*.deb upload/ || true
                   cp src/tauri/target/*/release/bundle/appimage/*.AppImage upload/ || true
-                  cp src/tauri/target/*/release/bundle/dmg/*.dmg upload/ || true
+                  find src/tauri/target -path '*/release/bundle/*' -name '*.sig' -exec cp {} upload/ \;
+
+            - name: 准备产物目录
+              if: matrix.os == 'macos-14'
+              run: |
+                  mkdir -p upload
+                  cp src/tauri/target/*/release/bundle/dmg/*.dmg upload/
+                  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+                      if [ "$target" = "aarch64-apple-darwin" ]; then arch=aarch64; else arch=x64; fi
+                      archive=(src/tauri/target/$target/release/bundle/macos/*.app.tar.gz)
+                      if [ ! -f "${archive[0]}" ] || [ ! -f "${archive[0]}.sig" ]; then
+                          echo "缺少 $target 的 macOS 更新产物或签名" >&2
+                          exit 1
+                      fi
+                      output="upload/Stapxs.QQ.Lite_${{ inputs.version }}_${arch}.app.tar.gz"
+                      cp "${archive[0]}" "$output"
+                      cp "${archive[0]}.sig" "$output.sig"
+                  done
 
             - name: 准备产物目录
               if: matrix.os == 'windows-2022'
               shell: pwsh
               run: |
                   New-Item -ItemType Directory -Path upload -Force
-                  $files = Get-ChildItem -Path "src/tauri/target/*/release/bundle/nsis/" -Filter *.exe -Recurse
+                  $files = Get-ChildItem -Path "src/tauri/target/*/release/bundle/nsis/" -Filter *.exe* -Recurse
                   foreach ($file in $files) {
                       Copy-Item -Path $file.FullName -Destination "upload/"
                   }

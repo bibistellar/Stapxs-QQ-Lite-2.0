@@ -24,14 +24,23 @@
             "desktop": {
                 "schemes": ["stapxs-qq-lite"]
             }
+        },
+        "updater": {
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEMDYzNzk2QkIxNzBFN0IKUldSN0RoZTdsamNHYmQ0TThkSVdML09Bd3pXb2RxTFVVeDJhRklpTjRoak1GU0ZiZnhUZjBrQVoK",
+            "endpoints": [
+                "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases/latest/download/latest.json"
+            ],
+            "windows": {
+                "installMode": "passive"
+            }
         }
     },
     "bundle": {
         "active": true,
         "copyright": "Copyright © 2022-2026 Stapx Steve [林槐]",
         "homepage": "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0",
-        "longDescription": "一个兼容 OneBot 协议的非官方 QQ 全平台客户端实现。",
-        "shortDescription": "一个兼容 OneBot 协议的非官方 QQ 全平台客户端实现。",
+        "longDescription": "一个基于 Tauri、兼容 OneBot 协议的非官方 QQ 桌面客户端。",
+        "shortDescription": "OneBot QQ Tauri 桌面客户端。",
         "publisher": "stapxs",
         "license": "AGPL-3.0-only",
         "targets": "all",

@@ -283,7 +283,7 @@
                 <!-- 搜索指示器 -->
                 <div :class="details[3].open ? 'search-tag show' : 'search-tag'">
                     <font-awesome-icon :icon="['fas', 'search']" />
-                    <span>{{ settingsStore.sysConfig.enable_local_history ? $t('搜索已保存的消息') : $t('搜索已加载的消息') }}</span>
+                    <span>{{ $t('搜索已保存的消息') }}</span>
                     <div @click="closeSearch">
                         <font-awesome-icon :icon="['fas', 'xmark']" />
                     </div>
@@ -845,11 +845,6 @@ onMounted(() => {
             tags.value.isJinLoading = false
         },
     )
-    if(backend.type == 'capacitor' && backend.platform === 'android') {
-        backend.addListener('App', 'backButton', () => {
-            exitWin()
-        })
-    }
     watch(() => connectionStore.backTimes, () => {
         exitWin()
     })
@@ -925,9 +920,7 @@ async function loadMoreHistory() {
     ) {
         const firstMsgId = list[0].message_id
         const firstMsgTime = Number(list[0]?.time)
-        const useMixedHistory =
-            settingsStore.sysConfig.enable_local_history &&
-            settingsStore.sysConfig.mixed_load_messages !== false
+        const useMixedHistory = settingsStore.sysConfig.mixed_load_messages !== false
         uiStore.nowGetHistory = true
         if (useMixedHistory && Number.isFinite(firstMsgTime)) {
             uiStore.historyBeforeTime = firstMsgTime
@@ -970,23 +963,16 @@ async function loadMoreHistory() {
             }
         }
 
-        const fullPage =
-            authStore.jsonMap.message_list?.pagerType == 'full'
         const type = chatStore.chatInfo.show.type
         const id = chatStore.chatInfo.show.id
-        let name
-        if (authStore.jsonMap.message_list && type != 'group') {
-            name = authStore.jsonMap.message_list.private_name
-        } else {
-            name = authStore.jsonMap.message_list.name
-        }
+        const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
         Connector.send(
-            name ?? 'get_chat_history',
+            name,
             {
                 group_id: type == 'group' ? id : undefined,
                 user_id: type != 'group' ? id : undefined,
                 message_id: firstMsgId,
-                count: fullPage? chatStore.messageList.length + 20: 20,
+                count: 20,
             },
             'getChatHistory',
         )
@@ -1009,15 +995,10 @@ function detectSeqGaps(msgs: any[]): string[] {
 function fillSeqGaps(anchorMsgIds: string[]) {
     const type = chatStore.chatInfo.show.type
     const id = chatStore.chatInfo.show.id
-    let name: string
-    if (authStore.jsonMap.message_list && type != 'group') {
-        name = authStore.jsonMap.message_list.private_name
-    } else {
-        name = authStore.jsonMap.message_list?.name
-    }
+    const name = type === 'group'? 'get_group_msg_history': 'get_friend_msg_history'
     for (const anchorMsgId of anchorMsgIds) {
         Connector.send(
-            name ?? 'get_chat_history',
+            name,
             {
                 group_id: type == 'group' ? id : undefined,
                 user_id: type != 'group' ? id : undefined,
@@ -1857,26 +1838,22 @@ function openChatInfoPan() {
     if (tags.value.openChatInfo) {
         if (
             chat.show.type === 'group' &&
-            chat.info.group_info.gc !== chat.show.id
+            chat.info.group_info.group_id !== chat.show.id
         ) {
-            const url = `https://qinfo.clt.qq.com/cgi-bin/qun_info/get_group_info_all?gc=${chat.show.id}&bkn=${authStore.loginInfo.bkn}`
             Connector.send(
-                'http_proxy',
-                { url: url },
-                'getMoreGroupInfo',
+                'get_group_info',
+                { group_id: chat.show.id },
+                'getGroupInfo',
             )
         } else if (
             chat.show.type === 'user' &&
-            chat.info.user_info.uin !== chat.show.id
+            chat.info.user_info.user_id !== chat.show.id
         ) {
-            const userInfo = authStore.jsonMap.friend_info.name
-            if(userInfo != undefined) {
-                Connector.send(
-                    userInfo,
-                    { user_id: chat.show.id },
-                    'getMoreUserInfo',
-                )
-            }
+            Connector.send(
+                'get_stranger_info',
+                { user_id: chat.show.id },
+                'getMoreUserInfo',
+            )
         }
         const noticeName = authStore.jsonMap.group_notices.name
         if (
@@ -2424,7 +2401,7 @@ async function handleInput(event: Event) {
         if (value.length == 0) {
             searchRequestId.value++
             tags.value.search.list = reactive(list)
-        } else if (settingsStore.sysConfig.enable_local_history) {
+        } else {
             const requestId = ++searchRequestId.value
             searchDebounceTimer.value = setTimeout(async () => {
                 const results = await dbSearchMessages(
@@ -2435,14 +2412,6 @@ async function handleInput(event: Event) {
                 if (requestId !== searchRequestId.value || !details.value[3].open) return
                 tags.value.search.list = results
             }, 180)
-        } else {
-            searchRequestId.value++
-            tags.value.search.list = list.filter(
-                (item: any) => {
-                    const rawMessage = getMsgRawTxt(item)
-                    return rawMessage.indexOf(value) !== -1
-                },
-            )
         }
     }
 }
