@@ -100,6 +100,15 @@ pub struct OutgoingRecord {
     pub echo: String,
 }
 
+/// 备份并移走旧数据库后的结果。
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbRebuildResult {
+    /// 没有旧数据库文件时为空。
+    pub backup_directory: Option<String>,
+    pub moved_files: usize,
+}
+
 /// 获取当前平台的数据库加密密钥。
 /// 若系统密码管理器不可用，回退到设备本地随机密钥文件（每台设备唯一）。
 fn get_db_key(db_path: &std::path::Path) -> Result<String, String> {
@@ -169,20 +178,16 @@ pub fn open_db(data_dir: PathBuf) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(&data_dir).ok();
     let db_path = data_dir.join("messages.db");
 
-    open_or_recreate(db_path)
+    open_encrypted_db(db_path)
 }
 
-/// 尝试以加密模式打开数据库；失败直接抛出异常结束
-fn open_or_recreate(db_path: std::path::PathBuf) -> rusqlite::Result<Connection> {
+/// 尝试以加密模式打开数据库；失败返回给调用方，由界面提供重建入口。
+fn open_encrypted_db(db_path: std::path::PathBuf) -> rusqlite::Result<Connection> {
     match try_open_encrypted(&db_path) {
         Ok(conn) => Ok(conn),
         Err(e) => {
-            log::warn!(
-                "无法以加密模式打开 {:?}（{}）",
-                db_path, e
-            );
-            // 直接退出应用
-            std::process::exit(1);
+            error!("无法以加密模式打开 {:?}（{}）", db_path, e);
+            Err(e)
         }
     }
 }
@@ -347,6 +352,73 @@ pub fn db_save_messages(
 
 fn valid_outgoing_state(state: &str) -> bool {
     matches!(state, "pending" | "sending" | "failed" | "uncertain")
+}
+
+/// 关闭当前连接，将数据库及事务日志文件移入带时间戳的备份目录。
+/// 加密密钥文件不会被移动，新数据库继续使用原有设备密钥。
+#[tauri::command]
+pub fn db_rebuild(state: State<DbState>) -> Result<DbRebuildResult, String> {
+    let mut inner = state.0.lock().map_err(|e| e.to_string())?;
+
+    if let Some(conn) = inner.conn.take() {
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        drop(conn);
+    }
+
+    backup_database_files(&inner.data_dir)
+}
+
+fn backup_database_files(data_dir: &std::path::Path) -> Result<DbRebuildResult, String> {
+    let sources = [
+        (data_dir.join("messages.db"), "messages.db"),
+        (data_dir.join("messages.db-wal"), "messages.db-wal"),
+        (data_dir.join("messages.db-shm"), "messages.db-shm"),
+        (data_dir.join("messages.db-journal"), "messages.db-journal"),
+    ];
+    let existing: Vec<_> = sources
+        .into_iter()
+        .filter(|(path, _)| path.exists())
+        .collect();
+
+    if existing.is_empty() {
+        return Ok(DbRebuildResult {
+            backup_directory: None,
+            moved_files: 0,
+        });
+    }
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let base_name = format!("messages-db-backup-{}", timestamp);
+    let mut backup_dir = data_dir.join(&base_name);
+    let mut suffix = 1;
+    while backup_dir.exists() {
+        backup_dir = data_dir.join(format!("{}-{}", base_name, suffix));
+        suffix += 1;
+    }
+    fs::create_dir_all(&backup_dir).map_err(|e| format!("创建数据库备份目录失败：{}", e))?;
+
+    let mut moved = Vec::new();
+    for (source, file_name) in existing {
+        let target = backup_dir.join(file_name);
+        if let Err(e) = fs::rename(&source, &target) {
+            for (moved_source, moved_target) in moved.iter().rev() {
+                let _ = fs::rename(moved_target, moved_source);
+            }
+            let _ = fs::remove_dir(&backup_dir);
+            return Err(format!("备份数据库文件 {:?} 失败：{}", source, e));
+        }
+        moved.push((source, target));
+    }
+
+    info!(
+        "旧 SQLite 数据库已备份至 {:?}（{} 个文件）",
+        backup_dir,
+        moved.len()
+    );
+    Ok(DbRebuildResult {
+        backup_directory: Some(backup_dir.to_string_lossy().into_owned()),
+        moved_files: moved.len(),
+    })
 }
 
 /// 新建或更新一条持久化发件箱记录。
@@ -1039,4 +1111,41 @@ fn row_to_outgoing_record(row: &rusqlite::Row) -> rusqlite::Result<OutgoingRecor
         retry_count: row.get(13)?,
         echo: row.get(14)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebuild_moves_database_files_but_keeps_key() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "stapxs-db-rebuild-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        for name in [
+            "messages.db",
+            "messages.db-wal",
+            "messages.db-shm",
+            "messages.db-journal",
+        ] {
+            fs::write(test_dir.join(name), name.as_bytes()).unwrap();
+        }
+        fs::write(test_dir.join("messages.dbkey"), b"keep-this-key").unwrap();
+
+        let result = backup_database_files(&test_dir).unwrap();
+        let backup_dir = PathBuf::from(result.backup_directory.unwrap());
+
+        assert_eq!(result.moved_files, 4);
+        assert!(test_dir.join("messages.dbkey").exists());
+        assert!(!test_dir.join("messages.db").exists());
+        assert!(backup_dir.join("messages.db").exists());
+        assert!(backup_dir.join("messages.db-wal").exists());
+        assert!(backup_dir.join("messages.db-shm").exists());
+        assert!(backup_dir.join("messages.db-journal").exists());
+
+        fs::remove_dir_all(&test_dir).unwrap();
+    }
 }

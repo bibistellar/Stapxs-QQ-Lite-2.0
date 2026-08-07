@@ -349,6 +349,18 @@
                     <span class="db-stat-label">{{ $t('图片缓存') }}{{ dbStats.imageCount > 0 ? '\u00a0(' + dbStats.imageCount.toLocaleString() + ')' : '' }}</span>
                 </div>
             </div>
+            <div class="opt-item">
+                <font-awesome-icon :icon="['fas', 'database']" />
+                <div>
+                    <label>{{ $t('重建本地数据库') }}</label>
+                    <span>{{ $t('备份并重建数据库，用于处理旧版本数据库不兼容或损坏') }}</span>
+                </div>
+                <button class="ss-button" type="button"
+                    :disabled="rebuildingDatabase"
+                    @click="confirmRebuildLocalDatabase">
+                    {{ rebuildingDatabase ? $t('处理中') : $t('重建') }}
+                </button>
+            </div>
         </div>
         <div class="ss-card">
             <header>{{ $t('分析信息') }}</header>
@@ -415,7 +427,7 @@
 
     import UmamiInfoPan from '@renderer/components/UmamiInfoPan.vue'
     import { backend } from '@renderer/runtime/backend'
-    import { dbClearImages, dbGetStats } from '@renderer/function/utils/localHistoryUtil'
+    import { dbClearImages, dbGetStats, dbRebuild } from '@renderer/function/utils/localHistoryUtil'
     import { useSettingsStore } from '@renderer/state/settings'
     import { useAuthStore } from '@renderer/state/auth'
     import { useUIStore } from '@renderer/state/ui'
@@ -429,6 +441,7 @@
 
     const dbStats = ref<{ totalMessages: number; imageCount: number; imageCacheBytes: number; dbSizeBytes: number } | null>(null)
     const clearImageProgressText = ref('')
+    const rebuildingDatabase = ref(false)
     const ndt = ref(0)
     const ndv = ref(false)
 
@@ -447,6 +460,42 @@
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
         if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+    }
+
+    function confirmRebuildLocalDatabase() {
+        if (rebuildingDatabase.value) return
+        const popInfo = {
+            title: $t('重建本地数据库'),
+            html: `<span>${$t('重建将清空当前本地消息、图片缓存和待发送消息。旧数据库文件会备份到应用数据目录，完成后应用将自动重启。是否继续？')}</span>`,
+            button: [
+                {
+                    text: $t('确认重建'),
+                    fun: async() => {
+                        uiStore.popBoxList.shift()
+                        rebuildingDatabase.value = true
+                        const result = await dbRebuild()
+                        if (result === null) {
+                            rebuildingDatabase.value = false
+                            new PopInfo().add(
+                                PopType.ERR,
+                                $t('本地数据库备份失败，未执行重建'),
+                                false,
+                            )
+                            return
+                        }
+                        await backend.call(undefined, 'win:relaunch', false)
+                    },
+                },
+                {
+                    text: $t('取消'),
+                    master: true,
+                    fun: () => {
+                        uiStore.popBoxList.shift()
+                    },
+                },
+            ],
+        }
+        uiStore.popBoxList.push(popInfo)
     }
 
     function showUmamiInfo() {

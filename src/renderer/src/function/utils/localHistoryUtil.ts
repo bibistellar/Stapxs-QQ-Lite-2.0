@@ -446,6 +446,29 @@ export async function dbGetStats(
     return callDb(selfId, 'db:getStats', {}, null, '[LocalHistory] dbGetStats 失败')
 }
 
+export interface DbRebuildResult {
+    backupDirectory: string | null
+    movedFiles: number
+}
+
+/**
+ * 关闭 SQLite 连接并备份主库及事务日志文件。
+ * 此命令不依赖数据库能够正常打开，可用于恢复不兼容的旧数据库。
+ */
+export async function dbRebuild(): Promise<DbRebuildResult | null> {
+    try {
+        const result = await backend.call(undefined, 'db:rebuild', true)
+        if (!result || typeof result.movedFiles !== 'number') return null
+        return {
+            backupDirectory: result.backupDirectory ?? null,
+            movedFiles: result.movedFiles,
+        }
+    } catch (e) {
+        logger.error(e as unknown as Error, '[LocalHistory] dbRebuild 失败')
+        return null
+    }
+}
+
 /**
  * 计算 URL 的 SHA-256 十六进制摘要，用作图片缓存的唯一键。
  */

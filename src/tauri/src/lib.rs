@@ -253,6 +253,7 @@ pub fn run() {
             commands::opt::opt_get_all,
             commands::opt::opt_get,
             commands::opt::opt_clear_all,
+            commands::db::db_rebuild,
             commands::db::db_save_messages,
             commands::db::db_save_outgoing,
             commands::db::db_update_outgoing_state,
