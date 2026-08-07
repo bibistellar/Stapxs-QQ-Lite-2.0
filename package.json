@@ -1,6 +1,6 @@
 {
   "name": "stapxs-qq-lite",
-  "version": "3.4.6",
+  "version": "3.5.0",
   "author": "Stapx Steve [林槐]",
   "description": "一个基于 Tauri、兼容 OneBot 协议的非官方 QQ 桌面客户端。",
   "homepage": "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0",
