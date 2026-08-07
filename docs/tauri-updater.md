@@ -4,7 +4,7 @@
 
 ## 首次配置
 
-当前客户端验签公钥已经固化在 `src/tauri/tauri.conf.json`。对应的无密码私钥只保存在 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 中；GitHub UI 和 API 无法读回原值，发布工作流只在打包进程环境中使用它。应通过分支保护限制对发布工作流的修改权限。
+当前客户端验签公钥已经固化在 `src/tauri/tauri.conf.json`。对应的加密私钥和随机密码分别保存在 GitHub Actions Secrets `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 中；GitHub UI 和 API 无法读回原值，发布工作流只在打包进程环境中使用它们。应通过分支保护限制对发布工作流的修改权限。
 
 私钥不得提交到仓库。GitHub Secret 写入后无法读取，只能覆盖或删除；仓库或 Secret 丢失后，已安装客户端将无法验证使用新密钥签出的更新。如需容灾，应将私钥额外保存到受控的云端加密保险库。
 

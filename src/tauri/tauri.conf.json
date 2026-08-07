@@ -26,7 +26,7 @@
             }
         },
         "updater": {
-            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGREVGMkIxRjkxNzQ5OUIKUldTYlNSZjVzZkxlTDRHdXlQdytJVFV5VEZkVmpnMzJJMFd0MkFhbTVqN3VPR2VLYUFNRFRSb1AK",
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZEMDYzNzk2QkIxNzBFN0IKUldSN0RoZTdsamNHYmQ0TThkSVdML09Bd3pXb2RxTFVVeDJhRklpTjRoak1GU0ZiZnhUZjBrQVoK",
             "endpoints": [
                 "https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases/latest/download/latest.json"
             ],
