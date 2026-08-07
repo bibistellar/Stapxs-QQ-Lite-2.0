@@ -82,10 +82,10 @@ jobs:
             # 无需 Apple 开发者证书；未签名/未公证，用户首次打开需右键 → 打开
             - name: 构建 Tauri 应用（Apple Silicon）
               if: matrix.os == 'macos-14'
-              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t aarch64-apple-darwin -b dmg
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t aarch64-apple-darwin -b app,dmg
             - name: 构建 Tauri 应用（Intel，交叉编译）
               if: matrix.os == 'macos-14'
-              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t x86_64-apple-darwin -b dmg
+              run: yarn build:tauri -c src/tauri/tauri.updater.conf.json -t x86_64-apple-darwin -b app,dmg
 
             - name: 准备产物目录
               if: matrix.os == 'ubuntu-22.04' || matrix.os == 'ubuntu-22.04-arm'
