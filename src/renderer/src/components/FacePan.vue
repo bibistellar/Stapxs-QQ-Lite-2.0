@@ -466,6 +466,7 @@ function recordRecentEmoji<T>(recordList: ShallowRef<T[]>, id: T) {
 function customFaceTooltip(url: string): VueCompData<typeof CustomFaceTooltip> {
     return {
         comp: CustomFaceTooltip,
+        model: undefined,
         props: { url }
     }
 }

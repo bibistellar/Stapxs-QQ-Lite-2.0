@@ -9,11 +9,7 @@ body:
       attributes:
           label: 适用版本
           options:
-              - Stapxs QQ Lite（All）
-              - Stapxs QQ Lite（Web）
-              - Stapxs QQ Lite（Electron/Tauri）
-              - Stapxs QQ Lite (Android)
-              - Stapxs QQ Lite (iOS/iPadOS)
+              - Stapxs QQ Lite（Tauri）
               - 其他
     - type: textarea
       attributes:

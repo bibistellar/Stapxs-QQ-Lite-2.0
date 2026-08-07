@@ -92,8 +92,6 @@ export const optDefault: { [key: string]: any } = {
     opt_fast_animation: false,
     chat_more_blur: false,
     glass_effect: false,
-    initial_scale: 0.85,
-    fs_adaptation: 0,
     opt_always_top: false,
     opt_revolve: false,
     use_favicon_notice: true,
@@ -148,7 +146,6 @@ const configFunction: { [key: string]: (value: any) => void } = {
     opt_auto_dark: setAutoDark,
     theme_color: changeTheme,
     chatview_name: changeChatView,
-    initial_scale: changeInitialScale,
     msg_type: setMsgType,
     opt_auto_win_color: updateWinColorOpt,
     opt_revolve: viewRevolve,
@@ -322,21 +319,6 @@ function setMsgType(value: any) {
 }
 
 /**
- * 修改移动端缩放比例
- * @param value 数值（0.5 - 1.5）
- */
-function changeInitialScale(value: number) {
-    const viewport = document.getElementById('viewport')
-    if (viewport && value && value >= 0.5 && value <= 1.5) {
-        (viewport as any).content =
-            `width=device-width, initial-scale=${value}, maximum-scale=5, user-scalable=0`
-    } else {
-        (viewport as any).content =
-            'width=device-width, initial-scale=0.85, maximum-scale=5, user-scalable=0'
-    }
-}
-
-/**
  * 加载语言文件并设置为当前的语言
  * @param name 语言文件名（不是实际语言代码）
  */
@@ -494,14 +476,6 @@ function changeColorMode(mode: string) {
     }
     // 记录
     settingsStore.darkMode = mode === 'dark'
-    // Capacitor: 状态栏颜色（Android）
-    if(backend.isMobile()) {
-        backend.call('StatusBar', 'setStyle', false, { style: mode.toUpperCase() })
-    }
-    // Capacitor: VConsole 颜色
-    if(backend.function && 'vConsole' in backend.function && backend.function.vConsole) {
-        backend.function.vConsole.setOption('theme', mode)
-    }
     // 刷新图标
     refreshFavicon()
 }
@@ -553,41 +527,23 @@ function changeChatView(name: string | undefined) {
 // =============== 设置基础功能 ===============
 
 /**
- * 读取并序列化 localStorage 中的设置项（electron 读取 electron-store 存储）
+ * 从 Tauri Store 读取并序列化设置项。
  * @returns 设置项集合
  */
 export async function load(): Promise<{ [key: string]: any }> {
     let data = {} as { [key: string]: any }
 
-    if ('electron' == backend.type) {
-        data = backend.callSync('opt:getAll')
-    } else if('tauri' == backend.type) {
-        data = await backend.call(undefined, 'opt:getAll', true)
-        // 处理下 json 字符串
-        Object.keys(data).forEach((key) => {
-            const value = data[key]
-            if (typeof value == 'string') {
-                try {
-                    data[key] = JSON.parse(value)
-                } catch (e: unknown) {
-                    // ignore
-                }
-            }
-        })
-    } else {
-        const str = localStorage.getItem('options')
-        if (str != null) {
-            const list = str.split('&')
-            for (let i = 0; i <= list.length; i++) {
-                if (list[i] !== undefined) {
-                    const opt: string[] = list[i].split(':')
-                    if (opt.length === 2) {
-                        data[opt[0]] = opt[1]
-                    }
-                }
+    data = await backend.call(undefined, 'opt:getAll', true) ?? {}
+    Object.keys(data).forEach((key) => {
+        const value = data[key]
+        if (typeof value == 'string') {
+            try {
+                data[key] = JSON.parse(value)
+            } catch (e: unknown) {
+                // 保留普通字符串
             }
         }
-    }
+    })
     return loadOptData(data)
 }
 
@@ -701,31 +657,9 @@ export function get(name: string): any {
  * @returns 设置项值（如果没有则为 null）
  * @description <strong>注意：</strong>
  * 此方法获取原始设置项值，不会对值进行 T/F 转换、JSON 解析、URL 解码等操作；
- * 在 Web 端和 Capacitor 端使用时由于存储在 WebStorage 中，需要特别注意预防上述未转换导致的错误。
  */
 export function getRaw(name: string) {
-    if ('electron' == backend.type) {
-        return backend.call('opt:get', name, true)
-    } else if('tauri' == backend.type) {
-        return backend.call(undefined, 'opt:get', true, name)
-    } else {
-        // 解析拆分并执行各个设置项的初始化方法
-        const str = localStorage.getItem('options')
-        if (str != null) {
-            const list = str.split('&')
-            for (let i = 0; i <= list.length; i++) {
-                if (list[i] !== undefined) {
-                    const opt: string[] = list[i].split(':')
-                    if (opt.length === 2) {
-                        if (name == opt[0]) {
-                            return Promise.resolve(opt[1])
-                        }
-                    }
-                }
-            }
-        }
-        return Promise.resolve(null)
-    }
+    return backend.call(undefined, 'opt:get', true, name)
 }
 
 /**
@@ -741,30 +675,12 @@ export function saveAll(config = {} as { [key: string]: any }) {
     if (Object.keys(config).length == 0) {
         Object.assign(config, cacheConfigs)
     }
-    let str = ''
+    const saveConfig = config
     Object.keys(config).forEach((key) => {
         const isObject = typeof config[key] == 'object'
-        str +=
-            key +
-            ':' +
-            encodeURIComponent(
-                isObject ? JSON.stringify(config[key]) : config[key],
-            ) +
-            '&'
+        saveConfig[key] = isObject ? JSON.stringify(config[key]): config[key]
     })
-    str = str.substring(0, str.length - 1)
-    localStorage.setItem('options', str)
-
-    // electron：将配置保存
-    if (backend.isDesktop()) {
-        const saveConfig = config
-        Object.keys(config).forEach((key) => {
-            const isObject = typeof config[key] == 'object'
-            saveConfig[key] = isObject ? JSON.stringify(config[key]): config[key]
-        })
-        backend.call(undefined, 'opt:saveAll', false,
-            backend.type == 'tauri' ? { data: saveConfig } : saveConfig)
-    }
+    backend.call(undefined, 'opt:saveAll', false, { data: saveConfig })
 }
 
 /**

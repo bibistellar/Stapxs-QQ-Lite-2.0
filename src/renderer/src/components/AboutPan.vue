@@ -31,7 +31,7 @@
                 <span>{{ $t('Stapxs QQ Lite') }}</span>
             </div>
             <span style="text-align: center">{{
-                $t('一个兼容 OneBot 的非官方网页版 QQ 客户端') }}</span>
+                $t('一个兼容 OneBot 的非官方 QQ 桌面客户端') }}</span>
             <a>v{{ packageInfo.version }}</a>
             <div class="buttons">
                 <a class="ss-button" @click="goGithub()">{{ $t('访问 GitHub 仓库') }}</a>

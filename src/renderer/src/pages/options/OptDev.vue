@@ -7,7 +7,7 @@
 
 <template>
     <div class="opt-page">
-        <div v-if="!napcat" class="ss-card">
+        <div class="ss-card">
             <header>{{ $t('兼容选项') }}</header>
             <div class="tip">
                 {{
@@ -101,7 +101,7 @@
                     </div>
                 </label>
             </div>
-            <div v-if="!napcat" class="opt-item">
+            <div class="opt-item">
                 <font-awesome-icon :icon="['fas', 'palette']" />
                 <div>
                     <span>{{ $t('注入自定义样式') }}</span>
@@ -319,7 +319,6 @@
 
     const $t = i18n.global.t
 
-    const napcat = import.meta.env.VITE_NAPCAT
     const dev = import.meta.env.DEV
 
     const jsonMapName = ref(authStore.jsonMap?.name ?? '')
@@ -388,27 +387,6 @@
     }
 
     function printRuntime() {
-        if(backend.isMobile()) {
-            const switcher = document.getElementById('__vconsole')?.getElementsByClassName('vc-switch')[0]
-            if (switcher) {
-                (switcher as HTMLDivElement).click()
-            // safeArea
-            backend.call('SafeArea', 'getSafeArea', true).then((safeArea) => {
-                if (safeArea) {
-                    const vcPanel = document.getElementById('__vconsole')?.getElementsByClassName('vc-panel')[0]
-                    if (vcPanel) {
-                        // vc-content、vc-toolbar
-                        const vcContent = vcPanel.getElementsByClassName('vc-content')[0] as HTMLDivElement
-                        const vcToolbar = vcPanel.getElementsByClassName('vc-toolbar')[0] as HTMLDivElement
-                        if (vcContent && vcToolbar) {
-                            vcContent.style.marginBottom = safeArea.bottom + 'px'
-                            vcToolbar.style.marginBottom = safeArea.bottom + 'px'
-                        }
-                    }
-                }
-            })
-            }
-        }
         /* eslint-disable no-console */
         console.log('=========================')
         console.log('settingsStore:', settingsStore.$state)
@@ -416,9 +394,7 @@
         console.log('uiStore:', uiStore.$state)
         console.log('=========================')
         /* eslint-enable no-console */
-        if(!backend.isMobile()) {
-            backend.call(undefined, 'win:openDevTools', false)
-        }
+        backend.call(undefined, 'win:openDevTools', false)
     }
 
     async function printVersionInfo() {
@@ -428,10 +404,7 @@
         )
 
         // 索要框架信息
-        const addInfo = await backend.call('Onebot', 'opt:getSystemInfo', true)
-        if(backend.isMobile() && backend.function && 'vConsole' in backend.function && backend.function.vConsole) {
-            addInfo.vconsole = ['vConsole Version', backend.function.vConsole.version ?? 'Not loaded']
-        }
+        const addInfo = await backend.call(undefined, 'opt:getSystemInfo', true)
 
         const browser = detect() as BrowserInfo
         let info = '```\n'
@@ -450,9 +423,8 @@
             })
         }
         // 获取安装信息，这儿主要判断几种已提交的包管理安装方式
-        if (backend.isDesktop() && backend.release) {
-            const process = window.electron?.process
-            switch (process && process.platform) {
+        if (backend.release) {
+            switch (backend.platform) {
                 case 'linux': {
                     // archlinux
                     if (backend.release.toLowerCase().indexOf('arch') > 0) {
@@ -462,12 +434,10 @@
                             )
                         if (pacmanInfo.success) {
                             info += '    Install Type      -> aur\n'
-                        } else if(backend.function && 'invoke' in backend.function) {
+                        } else {
                             // 也有可能是 stapxs-qq-lite，这是我自己打的原生包
-                            pacmanInfo = await backend.function.invoke(
-                                    'sys:runCommand',
-                                    'pacman -Q stapxs-qq-lite',
-                                )
+                            pacmanInfo = await backend.call(undefined, 'sys:runCommand', true,
+                                'pacman -Q stapxs-qq-lite')
                             if (pacmanInfo.success) {
                                 info += '    Install Type      -> pacman\n'
                             }
@@ -481,7 +451,6 @@
         info += 'Application Info:\n'
         info += `    Uptime            -> ${Math.floor(((new Date().getTime() - uptime) / 1000) * 100) / 100} s\n`
         info += `    Package Version   -> ${packageInfo.version}\n`
-        info += `    Service Work      -> ${navigator.serviceWorker?.controller ? 'active' : 'none'}\n`
 
         info += 'Backend Info:\n'
         info += `    Bot Info Name     -> ${authStore.botInfo.app_name}\n`
@@ -490,16 +459,6 @@
 
         info += 'View Info:\n'
         info += `    Doc Width         -> ${document.getElementById('app')?.offsetWidth} px\n`
-
-        // capactior：索要 safeArea
-        if (backend.isMobile()) {
-            const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-            if (safeArea) {
-                // 按照前端习惯，这儿的 safeArea 顺序是 top, right, bottom, left
-                const safeAreaStr = safeArea.top + ', ' + safeArea.right + ', ' + safeArea.bottom + ', ' + safeArea.left
-                info += `    Safe Area         -> ${safeAreaStr}\n`
-            }
-        }
 
         info += 'Network Info:\n'
         const testList = [

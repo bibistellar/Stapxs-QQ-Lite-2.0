@@ -2,7 +2,7 @@ name: check
 on:
     pull_request: # PR 触发
         branches:
-            - next
+            - 2.0
 
 jobs:
     check:

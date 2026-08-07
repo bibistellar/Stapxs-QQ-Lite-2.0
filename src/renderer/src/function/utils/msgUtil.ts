@@ -757,7 +757,7 @@ export function canGroupNotice(id: number) {
 /**
  * 戳一戳触发动画
  * @param animeBody 动画作用的元素
- * @param windowInfo 窗口信息，在 electron 中使用
+ * @param windowInfo Tauri 窗口信息
  */
 export function pokeAnime(animeBody: HTMLElement | null, windowInfo = null as {
     x: number

@@ -70,8 +70,7 @@
                         <div>Apache 2.0</div>
                         <font-awesome-icon :icon="['fas', 'angle-right']" />
                     </div>
-                    <div v-if="backend.type == 'tauri'"
-                        class="ss-card jump-card"
+                    <div class="ss-card jump-card"
                         @click="openLink('https://github.com/deltachat/deltachat-desktop')">
                         <header>
                             <div />
@@ -110,33 +109,22 @@
                     }}</span>
                 </div>
                 <div class="dept">
-                    <div v-if="backend.platform == 'web'"
-                        class="ss-card jump-card"
-                        @click="openLink('https://github.com/Stapxs/Stapxs-Web-API')">
+                    <div class="ss-card jump-card"
+                        @click="openLink('https://gitlab.com/Binaryify/NeteaseCloudMusicApi')">
                         <header>
                             <div />
-                            <div>Stapxs Web API<span>{{ $t('基础链接预览服务') }}</span></div>
+                            <div>Netease Cloud Music API<span>{{ $t('网易云音乐预览信息服务') }}</span></div>
                         </header>
                         <font-awesome-icon :icon="['fas', 'angle-right']" />
                     </div>
-                    <template v-else>
-                        <div class="ss-card jump-card"
-                            @click="openLink('https://gitlab.com/Binaryify/NeteaseCloudMusicApi')">
-                            <header>
-                                <div />
-                                <div>Netease Cloud Music API<span>{{ $t('网易云音乐预览信息服务') }}</span></div>
-                            </header>
-                            <font-awesome-icon :icon="['fas', 'angle-right']" />
-                        </div>
-                        <div class="ss-card jump-card"
-                            @click="openLink('https://api.bilibili.com')">
-                            <header>
-                                <div />
-                                <div>Bilibili API<span>{{ $t('Bilibili 预览信息服务') }}</span></div>
-                            </header>
-                            <font-awesome-icon :icon="['fas', 'angle-right']" />
-                        </div>
-                    </template>
+                    <div class="ss-card jump-card"
+                        @click="openLink('https://api.bilibili.com')">
+                        <header>
+                            <div />
+                            <div>Bilibili API<span>{{ $t('Bilibili 预览信息服务') }}</span></div>
+                        </header>
+                        <font-awesome-icon :icon="['fas', 'angle-right']" />
+                    </div>
                 </div>
             </div>
         </BcTab>
@@ -146,7 +134,6 @@
 <script setup lang="ts">
     import { i18n } from '@renderer/main'
     import { openLink } from '@renderer/function/utils/appUtil'
-    import { backend } from '@renderer/runtime/backend'
     import BcTab from 'vue3-bcui/packages/bc-tab'
 
     defineOptions({ name: 'DepPan' })

@@ -156,9 +156,7 @@ export function msgToRecord(msg: any): LocalMsgRecord | null {
     if (chatId == null) return null
 
     const chatType: string =
-        msg.message_type === 'group' || msg.infoList.group_id != null
-            ? 'group'
-            : 'private'
+        msg.message_type === 'group' || msg.infoList.group_id != null? 'group': 'private'
     const senderId: number = msg.infoList.sender
     if (senderId == null) return null
 

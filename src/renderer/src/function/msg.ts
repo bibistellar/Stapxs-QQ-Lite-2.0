@@ -168,9 +168,7 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
     const now = Math.floor(Date.now() / 1000)
     const cutoff = now - RECENT_HISTORY_SECONDS
     const source = candidates ?? [...contactStore.baseOnMsgList.values()]
-    const sessions = probeUnknown
-        ? source.slice(0, RECENT_HISTORY_PROBE_LIMIT)
-        : source.filter((item) => {
+    const sessions = probeUnknown? source.slice(0, RECENT_HISTORY_PROBE_LIMIT): source.filter((item) => {
             const time = normalizeSeconds(item.time)
             return time === 0 || time >= cutoff
         }).slice(0, RECENT_HISTORY_SESSION_LIMIT)
@@ -180,9 +178,7 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
         const seen = probeUnknown ? recentHistoryProbed : recentHistoryRequested
         if (!Number.isFinite(id) || id <= 0 || seen.has(id)) return
         const type = item.chat_type == 2 || item.group_id != undefined ? 'group' : 'user'
-        const name = type === 'group'
-            ? authStore.jsonMap.message_list?.name
-            : authStore.jsonMap.message_list?.private_name
+        const name = type === 'group'? authStore.jsonMap.message_list?.name: authStore.jsonMap.message_list?.private_name
         if (!name) return
         seen.add(id)
         window.setTimeout(() => {
@@ -193,9 +189,7 @@ function scheduleRecentHistoryBootstrap(candidates?: any[], probeUnknown = false
                 message_id: 0,
                 message_seq: 0,
                 count: probeUnknown ? 1 : RECENT_HISTORY_COUNT,
-            }, probeUnknown
-                ? `getChatHistoryBootstrapProbe_${id}_${type}`
-                : `getChatHistoryBootstrap_${id}_${type}`)
+            }, probeUnknown? `getChatHistoryBootstrapProbe_${id}_${type}`: `getChatHistoryBootstrap_${id}_${type}`)
         }, index * (probeUnknown ? 100 : RECENT_HISTORY_REQUEST_GAP))
     })
 }
@@ -767,12 +761,8 @@ const msgFunctions = {
                 value: data.nickname,
             })
             const title = `${data.nickname} `
-            if (backend.platform == 'web') {
-                document.title = title + '- Stapxs QQ Lite'
-            } else {
-                document.title = title
-                backend.call(undefined, 'win:setTitle', false, title)
-            }
+            document.title = title
+            backend.call(undefined, 'win:setTitle', false, title)
             // 结束登录页面的水波动画
             clearLoginWaveTimer()
             // 跳转标签卡
@@ -2264,9 +2254,7 @@ function newMsg(_: string, data: any) {
 
         // 预发送消息填充 ============================================
         // 同时从当前会话和跨会话 pending 缓存查找，避免切走后丢失确认回调。
-        const fakeMsg = sender == loginId
-            ? findOutgoingMessage(Number(id), data.message_id)
-            : undefined
+        const fakeMsg = sender == loginId? findOutgoingMessage(Number(id), data.message_id): undefined
         // 预发送消息刷新
         if (fakeMsg) {
             const trueMsg = getMsgData(

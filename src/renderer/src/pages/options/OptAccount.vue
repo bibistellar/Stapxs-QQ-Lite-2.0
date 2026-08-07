@@ -23,7 +23,7 @@
                             ? authStore.loginInfo.info.lnick : ''
                     }}</span>
                 </div>
-                <font-awesome-icon v-if="!sse && !napcat" :icon="['fas', 'right-from-bracket']" @click="exitConnect" />
+                <font-awesome-icon :icon="['fas', 'right-from-bracket']" @click="exitConnect" />
             </div>
             <div class="ss-card">
                 <header>{{ $t('账号设置') }}</header>
@@ -63,7 +63,7 @@
                 </button>
             </div>
         </template>
-        <div v-if="Object.keys(authStore.botInfo).length > 0 && !napcat"
+        <div v-if="Object.keys(authStore.botInfo).length > 0"
             class="ss-card">
             <header>{{ $t('后端信息') }}</header>
             <div class="l10n-info">
@@ -128,9 +128,6 @@ defineOptions({ name: 'ViewOptAccount' })
 const $t = i18n.global.t
 const connectionStore = useConnectionStore()
 const authStore = useAuthStore()
-
-const sse = import.meta.env.VITE_APP_SSE_MODE == 'true'
-const napcat = import.meta.env.VITE_NAPCAT
 
 /**
  * 对 botInfo 字段部分需要处理的数据进行处理

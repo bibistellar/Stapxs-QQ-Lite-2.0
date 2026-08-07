@@ -845,11 +845,6 @@ onMounted(() => {
             tags.value.isJinLoading = false
         },
     )
-    if(backend.type == 'capacitor' && backend.platform === 'android') {
-        backend.addListener('App', 'backButton', () => {
-            exitWin()
-        })
-    }
     watch(() => connectionStore.backTimes, () => {
         exitWin()
     })

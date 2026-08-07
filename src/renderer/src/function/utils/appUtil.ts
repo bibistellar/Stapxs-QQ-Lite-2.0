@@ -1,5 +1,4 @@
 import app from '@renderer/main'
-import FileDownloader from 'js-file-downloader'
 import option from '@renderer/function/option'
 import semver from 'semver'
 import appInfo from '../../../../../package.json'
@@ -10,7 +9,6 @@ import UpdatePan from '@renderer/components/UpdatePan.vue'
 import WelPan from '@renderer/components/WelPan.vue'
 import MealHungryPan from '@renderer/components/notice-component/MealHungryPan.vue'
 
-import { KeyboardInfo } from '@capacitor/keyboard'
 import { LogType, Logger, PopInfo, PopType } from '@renderer/function/base'
 import { Connector, login } from '@renderer/function/connect'
 import { BaseChatInfoElem, MenuEventData } from '@renderer/function/elements/information'
@@ -47,6 +45,7 @@ import { dbGetLatest } from './localHistoryUtil'
 import { parseMsg } from '../sender'
 import { Notify } from '../notify'
 import { mergeConversationMessages } from '../outgoingMessage'
+import { backend } from '@renderer/runtime/backend'
 
 const popInfo = new PopInfo()
 const logger = new Logger()
@@ -89,17 +88,7 @@ export function scrollToMsg(seqName: string, showAnimation: boolean, showHighlig
  * @param external 是否外部打开
  */
 export function openLink(url: string) {
-    // 判断是不是 Electron，是的话打开内嵌 iframe
-    if (backend.isDesktop()) {
-        const shell = window.electron?.shell
-        if (shell) {
-            shell.openExternal(url)
-        } else {
-            backend.call('', 'sys:openInBrowser', false, backend.unProxyUrl(url))
-        }
-    } else {
-        window.open(url)
-    }
+    backend.call(undefined, 'sys:openInBrowser', false, backend.unProxyUrl(url))
 }
 
 /**
@@ -270,39 +259,21 @@ export function downloadFile(
             url = 'https' + url.substring(url.indexOf('://'))
         }
     }
-    if (backend.isWeb()) {
-        try {
-            new FileDownloader({
-                url: url,
-                autoStart: true,
-                process: onprocess,
-                nameCallback: function () {
-                    return name
-                },
-            })
-        } catch (e) {
-            logger.error(e as Error, '下载文件失败')
-        }
-        return () => {} // Web 平台不需要清理
-    } else {
-        // 创建命名回调函数以便后续移除
-        const processCallback = (event: any, data: any) => {
-            onprocess(data || event.payload)
-        }
-        const cancelCallback = (event: any, data: any) => {
-            oncancel(data || event.payload)
-        }
-        backend.addListener(undefined, 'sys:downloadBack', processCallback)
-        backend.addListener(undefined, 'sys:downloadCancel', cancelCallback)
-        backend.call(undefined, 'sys:download', false, {
-            downloadPath: url,
-            fileName: name,
-        })
-        // 返回清理函数
-        return () => {
-            backend.removeListener(undefined, 'sys:downloadBack', processCallback)
-            backend.removeListener(undefined, 'sys:downloadCancel', cancelCallback)
-        }
+    const processCallback = (event: any, data: any) => {
+        onprocess(data || event.payload)
+    }
+    const cancelCallback = (event: any, data: any) => {
+        oncancel(data || event.payload)
+    }
+    backend.addListener(undefined, 'sys:downloadBack', processCallback)
+    backend.addListener(undefined, 'sys:downloadCancel', cancelCallback)
+    backend.call(undefined, 'sys:download', false, {
+        downloadPath: url,
+        fileName: name,
+    })
+    return () => {
+        backend.removeListener(undefined, 'sys:downloadBack', processCallback)
+        backend.removeListener(undefined, 'sys:downloadCancel', cancelCallback)
     }
 }
 
@@ -351,12 +322,8 @@ export function updateWinColor(color: string, type: string) {
     }
 }
 export async function loadWinColor() {
-    const process = window.electron?.process
-    let type = 'macos'
-    if (process && process.platform == 'win32') {
-        type = 'windows'
-    }
     // 获取系统主题色
+    const type = backend.platform === 'win32' ? 'windows' : 'macos'
     updateWinColor(await backend.call(undefined, 'sys:getWinColor', true), type)
 }
 
@@ -366,9 +333,7 @@ export async function loadWinColor() {
 export function createMenu() {
     const { $t } = app.config.globalProperties
     const contactStore = useContactStore()
-    // MacOS：初始化菜单
-    if (backend.isDesktop()) {
-        // 初始化菜单
+    // 初始化 Tauri 桌面菜单
         const menuTitles = {} as { [key: string]: string }
         menuTitles.success = $t(
             '应用显示完成，应用初始化完成！欢迎使用 {name}！',
@@ -410,9 +375,7 @@ export function createMenu() {
         menuTitles.feedback = $t('在 Github 上反馈问题')
         menuTitles.license = $t('许可协议')
 
-        backend.call(undefined, 'sys:createMenu', false,
-            backend.type == 'tauri' ? { data: menuTitles } : menuTitles)
-    }
+    backend.call(undefined, 'sys:createMenu', false, { data: menuTitles })
 }
 export function updateMenu(config: { parent: string, id: string; action: string; value: string }) {
     // MacOS：更新菜单
@@ -420,7 +383,7 @@ export function updateMenu(config: { parent: string, id: string; action: string;
 }
 
 /**
-* Electron：注册系统 IPC
+* 注册 Tauri 系统事件
 */
 export function createIpc() {
     const contactStore = useContactStore()
@@ -504,171 +467,6 @@ export function createIpc() {
     })
 }
 
-/**
-* Capacitor：初始化移动平台
-*/
-export async function loadMobile() {
-    const { $t } = app.config.globalProperties
-    // Capacitor：相关初始化
-    if (backend.isMobile()) {
-        // 注册回调监听
-        backend.addListener('Onebot', 'onebot:event', (data) => {
-            const msg = JSON.parse(data.data)
-            switch (data.type) {
-                case 'onopen': {
-                    login.creating = false
-                    Connector.onopen(login.address, login.token)
-                    break
-                }
-                case 'onmessage': Connector.onmessage(data.data); break
-                case 'onclose': {
-                    login.creating = false
-                    Connector.onclose(msg.code, msg.message, login.address, login.token)
-                    break
-                }
-                case 'onerror': {
-                    login.creating = false
-                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + msg.type, false);
-                    break
-                }
-                case 'onServiceFound': setQuickLogin(msg.address, msg.port); break
-                default: break
-            }
-        })
-        // initial-scale 缩放固定为 0.9
-        const viewport = document.getElementById('viewport')
-        if (viewport) {
-            (viewport as any).content =
-                'width=device-width, initial-scale=0.9, maximum-scale=5, user-scalable=0'
-        }
-        // 通知
-        const permission = await backend.call('LocalNotifications', 'checkPermissions', true)
-        const permissionStr = permission || permission.display
-        if (permissionStr.indexOf('prompt') != -1) {
-            await backend.call('LocalNotifications', 'requestPermissions', false)
-        } else if (permissionStr.indexOf('denied') != -1) {
-            logger.error(null, '通知权限已被拒绝')
-            logger.system('开发者阁下为什么要拒绝通知权限的请求呢？')
-        } else {
-            logger.debug('通知权限已开启')
-            // 注册通知类型
-            backend.call('LocalNotifications', 'registerActionTypes', false, {
-                types: [{
-                    id: 'msgQuickReply',
-                    actions: [{
-                        id: 'REPLY_ACTION',
-                        title: '快速回复',
-                        requiresAuthentication: true,
-                        input: true,
-                        inputButtonTitle: '发送',
-                        inputPlaceholder: '输入回复内容……'
-                    }]
-                }] as ActionType[]
-            })
-            // 注册相关事件
-            backend.addListener('LocalNotifications', 'localNotificationActionPerformed', (info) => {
-                const contactStore = useContactStore()
-                const notification =
-                    info.notification as LocalNotificationSchema
-                if (info.actionId == 'tap') {
-                    // PS：通知被点击后会自动被关闭，所以这里不需要处理
-                    jumpToChat(notification.extra.userId,
-                        notification.extra.msgId)
-                } else if (info.actionId == 'REPLY_ACTION') {
-                    // 快速回复
-                    sendMsgRaw(
-                        notification.extra.userId,
-                        notification.extra.chatType,
-                        parseMsg(info.inputValue ?? '', [{ type: 'reply', id: String(notification.extra.msgId) }], []),
-                        true
-                    )
-                    // 去消息列表内寻找，去除新消息标记
-                    const item = contactStore.baseOnMsgList.get(Number(notification.extra.userId))
-                    if (item) {
-                        if (item.new_msg) {
-                            item.new_msg = false
-                            contactStore.newMsgCount--
-                        }
-                        item.highlight = undefined
-                        contactStore.baseOnMsgList.set(Number(notification.extra.userId), item)
-                    }
-                }
-            })
-        }
-        // 键盘
-        backend.call('Keyboard', 'setAccessoryBarVisible', false, { isVisible: false })
-        backend.call('Keyboard', 'setResizeMode', false, { mode: 'none' })
-        backend.addListener('Keyboard', 'keyboardWillShow', async (info: KeyboardInfo) => {
-            const keyboardHeight = info.keyboardHeight
-
-            console.log('键盘高度：', keyboardHeight)
-
-            // 调整输入框高度
-            const sendMore = document.getElementById('send-more')
-            if (sendMore && keyboardHeight > window.innerHeight / 3) {
-                sendMore.style.paddingBottom = '10px'
-            }
-
-            const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-            const tabBar = document.getElementsByTagName('ul')[0]
-            // iOS 26 后键盘背景是半透明的，不能让 webview 调整高度，会漏出背景的黑色
-            // 干脆把所有的 iOS 版本处理方法都改为内部避让
-            if (backend.platform == 'ios') {
-                const baseApp = document.getElementById('base-app')
-                // 使用键盘高度减去底部安全区域，不添加额外偏移量
-                // 避免硬编码的 +100 导致 WebView 定位错误，引发键盘焦点丢失
-                const keyboardOffset = Math.max(0, keyboardHeight - safeArea.bottom)
-                if (safeArea && baseApp) {
-                    baseApp.style.setProperty('--safe-area-bottom', keyboardOffset + 'px')
-                }
-                // 调整菜单高度
-                if (safeArea && tabBar) {
-                    tabBar.style.setProperty('padding-bottom', keyboardOffset + 'px', 'important')
-                }
-            }
-
-            // 调整整个 HTML 的高度
-            // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
-            // const html = document.getElementsByTagName('html')[0]
-            // if (html && backend.platform == 'android') {
-            //     html.style.height = `calc(100% - ${keyboardHeight + safeArea.top}px)`
-            // }
-        })
-        backend.addListener('Keyboard', 'keyboardWillHide', async () => {
-            const sendMore = document.getElementById('send-more')
-            if (sendMore) {
-                sendMore.style.paddingBottom = 'var(--safe-area-bottom)'
-            }
-            if (backend.platform == 'ios') {
-                const baseApp = document.getElementById('base-app')
-                const safeArea = await backend.call('SafeArea', 'getSafeArea', true)
-                if (safeArea && baseApp) {
-                    baseApp.style.setProperty('--safe-area-bottom', safeArea.bottom + 'px')
-                }
-
-                const tabBar = document.getElementsByTagName('ul')[0]
-                if (tabBar) {
-                    tabBar.style.paddingBottom = ''
-                }
-            }
-            // 调整整个 HTML 的高度
-            // PS：仅用于解决 Android 在全屏沉浸式下键盘遮挡问题
-            const html = document.getElementsByTagName('html')[0]
-            if (html && backend.platform == 'android') {
-                html.style.height = 'calc(100%)'
-            }
-        })
-        // 状态栏（Android）
-        backend.call('NavigationBar', 'setTransparency', false, { isTransparent: true })
-        backend.call('StatusBar', 'setOverlaysWebView', false, { overlay: true })
-        backend.call('StatusBar', 'setBackgroundColor', false, { color: '#ffffff00' })
-    }
-}
-
-import horizontalCss from '@renderer/assets/css/append/mobile/append_mobile_horizontal.css?raw'
-import verticalCss from '@renderer/assets/css/append/mobile/append_mobile_vertical.css?raw'
-import { ActionType, LocalNotificationSchema } from '@capacitor/local-notifications'
-import { backend } from '@renderer/runtime/backend'
 import { NoticeBodyV3 } from '../elements/system'
 import { wheelMask } from '../input'
 import { addTooltip, TooltipController } from '../tooltip'
@@ -690,45 +488,10 @@ export async function loadAppendStyle() {
             })
     }
 
-    // 添加手机端样式
-    const updateCss = (appendCss = '') => {
-        const cssStype = document.getElementById('mobile-css')
-
-        const width = window.innerWidth
-        const height = window.innerHeight
-        if (cssStype) {
-            if (width > 600) {
-                cssStype.innerHTML = (width > height ? horizontalCss : (horizontalCss + verticalCss)) + appendCss
-            } else {
-                cssStype.innerHTML = horizontalCss + verticalCss + appendCss
-            }
-        }
-
-        if (backend.isDesktop()) {
-            backend.call(undefined, 'win:maximize', false)
-            const topBar = document.getElementsByClassName('top-bar')[0] as HTMLElement
-            if (topBar) {
-                topBar.style.display = 'none'
-            }
-        }
-    }
-    if (backend.isMobile()) {
-        const styleTag = document.createElement('style')
-        styleTag.id = 'mobile-css'
-        document.head.appendChild(styleTag)
-        updateCss()
-        // 屏幕旋转事件处理
-        window.addEventListener('resize', () => {
-            updateCss()
-        })
-    }
-
     // UI 2.0 附加样式
-    if (backend.isDesktop()) {
-        import('@renderer/assets/css/append/append_new.css').then(() => {
-            logger.info('UI 2.0 附加样式加载完成')
-        })
-    }
+    import('@renderer/assets/css/append/append_new.css').then(() => {
+        logger.info('UI 2.0 附加样式加载完成')
+    })
 
     if (option.get('chat_more_blur')) {
         import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
@@ -736,26 +499,15 @@ export async function loadAppendStyle() {
         })
     }
 
-    // napcat 插件模式附加样式
-    if (import.meta.env.VITE_NAPCAT) {
-        import('@renderer/assets/css/append/append_full_vibrancy.css').then(() => {
-            logger.info('完全透明 UI 附加样式加载完成')
-        })
-        import('@renderer/assets/css/append/append_napcat.css').then(() => {
-            logger.info('napcat 插件模式附加样式加载完成')
-        })
-    }
-
     // 透明 UI 附加样式
     let subVersion = backend.release?.split(' ')?.[1]?.split('.') as any
     subVersion = subVersion ? Number(subVersion[2]) : 0
-    if (backend.isDesktop() &&
-        (platform == 'darwin' || (platform == 'win32' && subVersion > 22621))) {
+    if (platform == 'darwin' || (platform == 'win32' && subVersion > 22621)) {
         import('@renderer/assets/css/append/append_vibrancy.css').then(() => {
             logger.info('透明 UI 附加样式加载完成')
         })
     }
-    if (backend.isDesktop() && platform == 'linux') {
+    if (platform == 'linux') {
         const gnomeExtInfo = await backend.call(undefined, 'sys:getGnomeExt', true)
         if (gnomeExtInfo) {
             gnomeExtInfo.then((info: any) => {
@@ -880,9 +632,7 @@ function getReleaseDownloadUrl(data: any) {
         if (/(arm64|aarch64)/i.test(arch)) pattern = /_aarch64\.AppImage$/i
         else pattern = /_amd64\.AppImage$/i
     }
-    const asset = pattern
-        ? assets.find((item: any) => pattern?.test(String(item.name ?? '')))
-        : undefined
+    const asset = pattern? assets.find((item: any) => pattern?.test(String(item.name ?? ''))): undefined
     return asset?.browser_download_url ?? data.html_url
 }
 
@@ -903,7 +653,7 @@ function showReleaseLog(data: any, isUpdated: boolean) {
         message: msg,
         updated: isUpdated,
     }
-    const buttonGoUpdate = (!backend.isWeb()) ? [
+    const buttonGoUpdate = [
         {
             text: $t('知道了'),
             fun: () => uiStore.popBoxList.shift(),
@@ -912,16 +662,6 @@ function showReleaseLog(data: any, isUpdated: boolean) {
             text: $t('下载更新…'),
             master: true,
             fun: () => openLink(getReleaseDownloadUrl(data)),
-        },
-    ] : [
-        {
-            text: $t('查看…'),
-            fun: () => openLink(data.html_url),
-        },
-        {
-            text: $t('刷新页面'),
-            master: true,
-            fun: () => location.reload(),
         },
     ]
     const popInfo = {
@@ -1375,22 +1115,7 @@ export function changeGroupNotice(group_id: number, open: boolean) {
  * @returns
  */
 export function shouldAutoFocus(): boolean {
-    // 桌面端
-    if (backend.type !== 'web') {
-        // 除了苹果的不知道啥东西,都可以
-        if (['electron', 'tauri'].includes(backend.type)) {
-            return true
-        }
-        return false
-    }
-    // web端
-    else {
-        // 移动端浏览器不自动聚焦
-        if (/Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-            return false
-        }
-        return true
-    }
+    return true
 }
 
 /**
@@ -1622,21 +1347,11 @@ export function useKeyboard(...args: [string, ...string[], () => boolean | undef
 
 
 function localStorageGetItem(key: string): string | null {
-    if (backend.type === 'electron') {
-        return backend.callSync('opt:get', key)
-    } else {
-        // eslint-disable-next-line no-restricted-globals
-        return localStorage.getItem(key)
-    }
+    return localStorage.getItem(key)
 }
 
 function localStorageSetItem(key: string, value: string): void {
-    if (backend.type === 'electron') {
-        backend.callSync('opt:store', { key, value })
-    } else {
-        // eslint-disable-next-line no-restricted-globals
-        localStorage.setItem(key, value)
-    }
+    localStorage.setItem(key, value)
 }
 
 /**
@@ -2291,7 +2006,7 @@ function resolveBinding<T extends Component>(binding: VTooltipBinding<T>, eventD
     } else if ('comp' in binding) {
         return binding
     } else {
-        return { comp: binding, props: {} } as VueCompData<T>
+        return { comp: binding, props: {} } as unknown as VueCompData<T>
     }
 }
 

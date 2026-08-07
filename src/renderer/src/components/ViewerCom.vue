@@ -197,7 +197,6 @@ import {
     toRaw,
     useTemplateRef,
 } from 'vue'
-import { backend } from '@renderer/runtime/backend'
 import { useUIStore } from '@renderer/state/ui'
 
 const uiStore = useUIStore()
@@ -267,10 +266,7 @@ const changeViewerCssName = shallowRef('next')
 
 const forceShowButton = shallowRef(false)
 
-let canCors: boolean = false
-setTimeout(()=>{
-    canCors = !backend.isWeb()
-}, 10)
+const canCors = true
 
 // 双指缩放相关状态
 let touchResizeInfo: {
@@ -416,19 +412,7 @@ function init() {
     if (canCors)
         img.crossOrigin = 'anonymous'
 
-    if(backend.type === 'capacitor' && backend.function && 'plugins' in backend.function && 'CapacitorHttp' in backend.function.plugins) {
-        const capacitorHttp = backend.function.plugins.CapacitorHttp
-        capacitorHttp.get({
-            url: currentImg.value.src,
-            responseType: 'blob',
-        }).then((r: any) => {
-            img.src = 'data:image/png;base64,' + r.data
-        }).catch(() => {
-            img.src = currentImg.value?.src || ''
-        })
-    } else {
-        img.src = currentImg.value.src
-    }
+    img.src = currentImg.value.src
 
     img.onload = loadFinish
     loading.value = true

@@ -138,8 +138,8 @@ msgstr "未 support 到嘅訊息"
 msgid "预览图片"
 msgstr "圖片 preview"
 
-msgid "一个兼容 OneBot 的非官方网页版 QQ 客户端"
-msgstr "一個同 OneBot 相容嘅非官方網頁 QQ client"
+msgid "一个兼容 OneBot 的非官方 QQ 桌面客户端"
+msgstr "一個同 OneBot 相容嘅非官方 QQ 桌面 client"
 
 msgid "联系人"
 msgstr "聯絡人"

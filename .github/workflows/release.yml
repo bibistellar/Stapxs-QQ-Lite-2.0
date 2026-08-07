@@ -3,7 +3,7 @@ name: build-app
 on:
     push:
         branches:
-            - next
+            - 2.0
 
 jobs:
     # ========================= 准备项目 =========================
@@ -23,80 +23,6 @@ jobs:
               id: step_init
               run: echo VERSION=$(node -p "require('./package.json').version") >> $GITHUB_OUTPUT
 
-    # ========================= 构建 Web 版本 =========================
-
-    build-root-web:
-        name: 构建 Web 版本
-        needs: init
-
-        uses: ./.github/workflows/build-web.yml
-        with:
-            version: ${{ needs.init.outputs.version }}
-
-    # ======================= 构建 Docker 版本 ========================
-
-    build-docker:
-        name: 构建 Docker 版本
-        # 仅上游仓库发布 Docker 镜像；fork 没有 DOCKER_PASSWORD，跳过以免无谓失败
-        if: github.repository_owner == 'Stapxs'
-        needs:
-            - init
-            - build-root-web
-
-        uses: ./.github/workflows/build-docker.yml
-        with:
-            version: ${{ needs.init.outputs.version }}
-        secrets:
-            DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-
-    # ==================== 构建 Github Pages 版本 =====================
-    build-pages:
-        name: 构建 Github Pages 版本
-        # 仅上游仓库部署 Pages；fork 未开启 gh-pages，跳过以免无谓失败
-        if: github.repository_owner == 'Stapxs'
-        runs-on: ubuntu-latest
-        needs: init
-        steps:
-            # 拉取代码
-            - name: Checkout
-              uses: actions/checkout@v4
-              with:
-                  submodules: recursive
-            - name: 启用 Corepack
-              run: corepack enable
-            # 设置 Node.js 版本
-            - name: Load Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 22.x
-                  cache: 'yarn'
-            # 更新依赖
-            - name: Install
-              run: yarn
-            # 构建
-            - name: Build
-              run: yarn build
-              env:
-                  BUILD_ENV: github-actions
-
-            # 部署 Web 版本
-            - name: Deploy
-              uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
-              with:
-                github_token: ${{ secrets.GITHUB_TOKEN }}
-                publish_dir: ./dist
-                publish_branch: gh-pages
-                force_orphan: true
-
-    # ========================= 构建 Electron 版本 =========================
-    # build-electron:
-    #     name: 构建 Electron
-    #     needs: init
-
-    #     uses: ./.github/workflows/build-electron.yml
-    #     with:
-    #         version: ${{ needs.init.outputs.version }}
-
     # ========================= 构建 Tauri 版本 =========================
 
     build-tauri:
@@ -115,8 +41,6 @@ jobs:
             contents: write
         needs:
             - init
-            - build-root-web
-            # - build-electron
             - build-tauri
         steps:
             # 下载构建结果

@@ -5,11 +5,8 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import { resolve } from 'path'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { defineConfig, loadEnv, UserConfigFnObject, type PluginOption } from 'vite'
-import { VitePWA } from 'vite-plugin-pwa'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 import qfaceInfo from './src/renderer/src/assets/img/qq-face/public/assets/qq_emoji/_index.json' with { type: 'json' }
-
-const isDesktop = !!process.env.DESKTOP
 
 export function configFactory(outPath: string): UserConfigFnObject {
     return ({ mode }) => {
@@ -20,7 +17,6 @@ export function configFactory(outPath: string): UserConfigFnObject {
             vue(),
             vueDevTools(),
             ViteYaml(),
-            !isDesktop && VitePWA({ registerType: 'autoUpdate' }),
             visualizer() as PluginOption,
         ]
 
@@ -63,22 +59,14 @@ export function configFactory(outPath: string): UserConfigFnObject {
             root: './src/renderer',
             envDir: '../../',
             cacheDir: '../../.vite',
-            base: process.env.BUILD_ENV == 'github-actions' ? '/Stapxs-QQ-Lite-2.0/' : './',
+            base: './',
             server: {
                 port: 8080,
-                proxy: {
-                    '/api': {
-                        target: 'http://localhost:3000',
-                        changeOrigin: true,
-                        rewrite: (path) => path.replace(/^\/api/, '')
-                    }
-                }
             },
             plugins: plugins,
             resolve: {
                 alias: {
                     '@renderer': resolve(__dirname, 'src/renderer/src'),
-                    fs: 'rollup-plugin-node-polyfills/polyfills/empty',
                 }
             },
             build: {

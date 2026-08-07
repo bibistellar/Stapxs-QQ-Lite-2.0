@@ -168,7 +168,7 @@
                     <span>{{ $t('你可以使用其他组合键来换行') }}</span>
                 </div>
                 <div class="select-wrapper">
-                    <select v-if="backend.platform === 'darwin' || backend.platform === 'ios'" id="opt-function-send-key" v-model="settingsStore.sysConfig.send_key"
+                    <select v-if="backend.platform === 'darwin'" id="opt-function-send-key" v-model="settingsStore.sysConfig.send_key"
                         name="send_key" title="send_key" @change="save">
                         <option value="none">
                             Enter

@@ -71,36 +71,6 @@ function stopHealthCheck() {
     healthCheckFailures = 0
 }
 
-export let websocket: WebSocket | undefined = undefined
-let eventSource: EventSource | undefined = undefined
-
-function parseUrl(url: string) {
-    try {
-        return new URL(url)
-    } catch (e) {
-        if (e instanceof TypeError) return undefined
-        throw e
-    }
-}
-
-export function appendAccessToken(url: string, token?: string) {
-    if (!token) return url
-    const parsedUrl = parseUrl(url)
-    if (parsedUrl) {
-        parsedUrl.searchParams.set('access_token', token)
-        return parsedUrl.toString()
-    }
-
-    const [baseUrl, hash = ''] = url.split('#')
-    const tokenParam = `access_token=${encodeURIComponent(token)}`
-    const hashSuffix = hash ? `#${hash}` : ''
-    const nextUrl = baseUrl
-        .replace(/([?&])access_token=[^&]*/, `$1${tokenParam}`)
-    if (nextUrl !== baseUrl) return nextUrl + hashSuffix
-    const sep = baseUrl.includes('?') ? '&' : '?'
-    return `${baseUrl}${sep}${tokenParam}${hashSuffix}`
-}
-
 export function decodeStoredToken(token: string): string
 export function decodeStoredToken(token: undefined): undefined
 export function decodeStoredToken(token: string | undefined) {
@@ -183,7 +153,6 @@ export class Connector {
     private static openCurrentTarget() {
         if (!connectionTarget) return
 
-        const { $t } = app.config.globalProperties
         const address = connectionTarget.transportAddress
         const token = connectionTarget.token
         const attempt = ++connectionAttempt
@@ -200,80 +169,8 @@ export class Connector {
         logger.add(LogType.WS, '当前处于 ALL 日志模式。连接器将输出全部收发消息 ……')
         logger.add(LogType.WS, `正在连接到：${address}`)
 
-        // 桌面与移动端默认使用原生后端连接模式
-        if (!backend.isWeb()) {
-            logger.add(LogType.WS, '使用后端连接模式')
-            let args: { address: string, token: string } | { url: string }
-            if (backend.isDesktop()) {
-                args = { address, token }
-            } else {
-                args = { url: appendAccessToken(address, token) }
-            }
-            backend.call('Onebot', 'onebot:connect', false, args)
-            return
-        }
-
-        if(import.meta.env.VITE_APP_SSE_MODE == 'true') {
-            if(import.meta.env.VITE_APP_SSE_SUPPORT == 'false') {
-                // 如果 Bot 不支持 SSE 连接，直接跳过触发连接完成的后续操作
-                // PS：在未连接 SSE 的情况下，ssqq 将会缺失一些功能：
-                // - 新的消息推送、通知推送
-                // - 聊天面板新消息将不会自动更新，但依旧可以通过重新加载面板来获取新消息
-                this.onopen(address, token)
-                return
-            }
-            logger.add(LogType.WS, '使用 SSE 连接模式')
-            const sse = new EventSource(appendAccessToken(import.meta.env.VITE_APP_SSE_EVENT_ADDRESS, token))
-            eventSource?.close()
-            eventSource = sse
-            sse.onopen = () => {
-                if (eventSource !== sse) return
-                this.onopen(address, token)
-            }
-            sse.onmessage = (e) => {
-                if (eventSource !== sse) return
-                this.onmessage(e.data)
-            }
-            sse.onerror = () => {
-                if (eventSource !== sse) return
-                finishConnectionAttempt()
-                popInfo.add(PopType.ERR, $t('连接不稳定'))
-                return
-            }
-            return
-        } else {
-            if (websocket && websocket.readyState !== WebSocket.CLOSED) {
-                logger.add(LogType.WS, '已有连接正在建立或关闭，忽略重复连接请求')
-                return
-            }
-
-            const url = appendAccessToken(address, token)
-            const currentSocket = new WebSocket(url)
-            websocket = currentSocket
-
-            currentSocket.onopen = () => {
-                if (websocket !== currentSocket) return
-                this.onopen(address, token)
-            }
-            currentSocket.onmessage = (e) => {
-                if (websocket !== currentSocket) return
-                this.onmessage(e.data)
-            }
-            currentSocket.onclose = (e) => {
-                if (websocket !== currentSocket) return
-                const reason = forceCloseReason ?? e.reason
-                forceCloseReason = undefined
-                this.onclose(e.code, reason, address, token)
-            }
-            currentSocket.onerror = (e) => {
-                if (websocket !== currentSocket) return
-                if (e instanceof ErrorEvent) {
-                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + e.message)
-                } else {
-                    popInfo.add(PopType.ERR, $t('连接失败') + ': ' + $t('未知错误'))
-                }
-            }
-        }
+        logger.add(LogType.WS, '使用 Tauri 后端连接模式')
+        backend.call(undefined, 'onebot:connect', false, { address, token })
     }
 
     // 连接事件 =====================================================
@@ -389,7 +286,6 @@ export class Connector {
         connectionStore.lastHeartbeatTime = -1
         stopHealthCheck()
         finishConnectionAttempt()
-        websocket = undefined
         login.status = false
         login.localReady = Boolean(useAuthStore().loginInfo?.uin)
         updateMenu({ parent: 'account', id: 'logout', action: 'visible', value: 'false' })
@@ -478,8 +374,6 @@ export class Connector {
         forceCloseReason = undefined
         stopHealthCheck()
         finishConnectionAttempt()
-        eventSource?.close()
-        eventSource = undefined
         // 用户主动断开：停止自动重连
         wantConnected = false
         connectionTarget = undefined
@@ -489,15 +383,7 @@ export class Connector {
             reconnectTimer = undefined
         }
 
-        if(!backend.isWeb()) {
-            backend.call('Onebot', 'onebot:close', false)
-        } else {
-            popInfo.add(
-                PopType.INFO,
-                app.config.globalProperties.$t('正在断开链接……'),
-            )
-            if (websocket) websocket.close(1000)
-        }
+        backend.call(undefined, 'onebot:close', false)
     }
 
     static forceDisconnect(reason: string) {
@@ -512,16 +398,8 @@ export class Connector {
         connectionStore.metaEventTimeoutTriggered = true
         forceCloseReason = reason
 
-        if(!backend.isWeb()) {
-            // 先真正关闭后端持有的 socket；关闭事件会回到 onclose 并进入统一重连流程。
-            backend.call('Onebot', 'onebot:close', false)
-            return
-        }
-        if (websocket) {
-            websocket.close(4000, reason)
-            return
-        }
-        this.onclose(1006, reason)
+        // 关闭事件会回到 onclose 并进入统一重连流程。
+        backend.call(undefined, 'onebot:close', false)
     }
 
     /**
@@ -584,8 +462,6 @@ export class Connector {
      */
     static startHealthCheck() {
         stopHealthCheck()
-        if (import.meta.env.VITE_APP_SSE_MODE == 'true') return
-
         const check = async () => {
             if (!wantConnected || !login.status || healthCheckRunning) return
             healthCheckRunning = true
@@ -636,12 +512,7 @@ export class Connector {
         }
 
         // 发送信息
-        if(import.meta.env.VITE_APP_SSE_MODE == 'true') {
-            // 使用 http POST 请求 /api/$name,body 为 json
-            this.sendSeeMod(apiMap.name, args, echo)
-        } else {
-            this.sendRaw(apiMap.name, args, echo)
-        }
+        this.sendRaw(apiMap.name, args, echo)
 
         // 处理响应
         try{
@@ -670,44 +541,7 @@ export class Connector {
         echo: string = name,
     ) {
         echo = 'send_' + echo
-        if(import.meta.env.VITE_APP_SSE_MODE == 'true') {
-            // 使用 http POST 请求 /api/$name,body 为 json
-            this.sendSeeMod(name,value,echo)
-        } else {
-            this.sendRaw(name, value, echo)
-        }
-    }
-    /**
-     * 使用 see 模式发请求，请求结果会一并送到onmessage方法上
-     * @param name api名称
-     * @param args 参数
-     * @param echo 回调标识
-     */
-    static sendSeeMod(
-        name: string,
-        args: { [key: string]: any },
-        echo: string = name,
-    ) {
-        fetch(`${import.meta.env.VITE_APP_SSE_HTTP_ADDRESS}/${name}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': login.token,
-            },
-            body: JSON.stringify(args),
-        }).then(async (response) => {
-            if (response.ok) {
-                try {
-                    const data = await response.json()
-                    data.echo = echo
-                    this.onmessage(JSON.stringify(data))
-                } catch (e) {
-                    logger.error(null, `API ${name} 返回非 JSON 数据`)
-                }
-            }
-        }).catch((error) => {
-            logger.error(error, ` 请求 API ${name} 失败`)
-        })
+        this.sendRaw(name, value, echo)
     }
     /**
      * 使用 ws 模式发请求，请求结果会送到onmessage方法上
@@ -727,11 +561,7 @@ export class Connector {
         }
         const json = JSON.stringify(actionData)
         // 发送
-        if(!backend.isWeb()) {
-            backend.call('Onebot', 'onebot:send', false, json)
-        } else if (websocket) {
-            websocket.send(json)
-        }
+        backend.call(undefined, 'onebot:send', false, json)
 
         if (Option.get('log_level') === 'debug') {
             logger.add(LogType.DEBUG, 'PUT：', JSON.parse(json))

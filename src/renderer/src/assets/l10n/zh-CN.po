@@ -138,7 +138,7 @@ msgstr ""
 msgid "预览图片"
 msgstr ""
 
-msgid "一个兼容 OneBot 的非官方网页版 QQ 客户端"
+msgid "一个兼容 OneBot 的非官方 QQ 桌面客户端"
 msgstr ""
 
 msgid "联系人"

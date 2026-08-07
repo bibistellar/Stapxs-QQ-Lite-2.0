@@ -215,7 +215,6 @@
     } from '@fortawesome/free-solid-svg-icons'
     import { Notify } from '@renderer/function/notify'
     import { refreshFavicon } from '@renderer/function/favicon'
-    import { backend } from '@renderer/runtime/backend'
     import History from '@renderer/components/History.vue'
     import { useUIStore } from '@renderer/state/ui'
     import { useAuthStore } from '@renderer/state/auth'
@@ -570,7 +569,7 @@
      * 显示群收纳盒
      */
     function showGroupAssistCheck() {
-        if(!showGroupAssist.value && chatStore.chatInfo.show.id == 0 && backend.type != 'capacitor' ) {
+        if(!showGroupAssist.value && chatStore.chatInfo.show.id == 0) {
             // 如果没有打开聊天框，打开收纳盒中的第一个群；这么做主要是为了防止动画穿帮
             const assistGroup = document.getElementById('group-assist-message-list-body')
             if(assistGroup && assistGroup.children.length > 0) {
