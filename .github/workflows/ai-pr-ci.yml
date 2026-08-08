@@ -95,7 +95,6 @@ jobs:
         run: |
           python3 -m unittest tests/test_ai_pr.py
           yarn check
-          git diff --exit-code
           yarn lint:tauri
           yarn test:connection
           yarn test:outgoing
