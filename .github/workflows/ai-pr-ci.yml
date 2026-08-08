@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Resolve the exact PR head
@@ -59,7 +59,7 @@ jobs:
                                   pkg-config \
                                   xdg-utils \
                                   build-essential \
-                                  librsvg2.0-dev \
+                                  librsvg2-dev \
                                   libwebkit2gtk-4.0-dev \
                                   libwebkit2gtk-4.1-dev \
                                   libjavascriptcoregtk-4.0-dev \
