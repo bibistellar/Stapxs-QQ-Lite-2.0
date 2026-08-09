@@ -6,6 +6,7 @@ import { ref, markRaw, defineAsyncComponent } from 'vue'
 export const useUIStore = defineStore('ui', () => {
     const openSideBar = ref(true)
     const nowGetHistory = ref(false)
+    const historyRequestPending = ref(false)
     const canLoadHistory = ref(true)
     const loadHistoryFail = ref(false)
     const historyBeforeTime = ref<number | undefined>(undefined)
@@ -44,6 +45,7 @@ export const useUIStore = defineStore('ui', () => {
     return {
         openSideBar,
         nowGetHistory,
+        historyRequestPending,
         canLoadHistory,
         loadHistoryFail,
         historyBeforeTime,

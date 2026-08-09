@@ -1,6 +1,6 @@
 [package]
 name = "stapxs-qq-lite"
-version = "3.5.0"
+version = "3.5.1"
 description = "一个基于 Tauri、兼容 OneBot 协议的非官方 QQ 桌面客户端。"
 authors = ["stapxs"]
 edition = "2024"

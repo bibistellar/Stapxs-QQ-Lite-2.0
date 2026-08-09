@@ -1023,10 +1023,15 @@ const msgFunctions = {
             )
             uiStore.loadHistoryFail = true
             uiStore.historyBeforeTime = undefined
+            uiStore.historyRequestPending = false
             uiStore.nowGetHistory = false
             return
         }
         const pan = document.getElementById('msgPan')
+        const finishHistoryRequest = () => {
+            uiStore.historyRequestPending = false
+            uiStore.nowGetHistory = false
+        }
         if (pan) {
             const oldScrollHeight = pan.scrollHeight
             saveMsg(msg, 'top').then(() => {
@@ -1037,9 +1042,17 @@ const msgFunctions = {
                         // 纠正滚动位置
                         pan.scrollTop = pan.scrollHeight - oldScrollHeight
                         pan.style.scrollBehavior = 'smooth'
+                        finishHistoryRequest()
                     }, 200);
                 })
+            }).catch((e) => {
+                finishHistoryRequest()
+                logger.error(e as Error, '加载历史消息失败')
             })
+        } else {
+            saveMsg(msg, 'top')
+                .catch((e) => logger.error(e as Error, '加载历史消息失败'))
+                .finally(finishHistoryRequest)
         }
     },
 
@@ -1659,7 +1672,9 @@ async function saveMsg(msg: any, append = undefined as undefined | string) {
 
         // 处于上拉边界过滤时，若结果为空则保留当前列表，避免误清空。
         if (hasHistoryBeforeTime && append === 'top' && list.length < 1) {
+            uiStore.canLoadHistory = false
             uiStore.historyBeforeTime = undefined
+            uiStore.historyRequestPending = false
             uiStore.nowGetHistory = false
             return
         }
@@ -1673,6 +1688,8 @@ async function saveMsg(msg: any, append = undefined as undefined | string) {
             if (list.length < 1) {
                 uiStore.canLoadHistory = false
                 uiStore.historyBeforeTime = undefined
+                uiStore.historyRequestPending = false
+                uiStore.nowGetHistory = false
                 return
             }
             const merged = mergeMessagesByIdAndTime(chatStore.messageList, list)

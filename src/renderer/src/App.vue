@@ -634,6 +634,7 @@ function changeChat(data: BaseChatInfoElem) {
     uiStore.canLoadHistory = true // 重置终止加载标志
     uiStore.loadHistoryFail = false // 重置加载失败标志
     uiStore.nowGetHistory = false // 重置分页加载标志，避免它卡在 true 导致切换会话不重新拉取历史
+    uiStore.historyRequestPending = false
     if (data.type == 'group') {
         // 获取自己在群内的资料
         Connector.send(

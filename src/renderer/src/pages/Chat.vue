@@ -916,12 +916,14 @@ function chatScroll(event: Event, pass: boolean) {
 async function loadMoreHistory() {
     if (
         !uiStore.nowGetHistory &&
+        !uiStore.historyRequestPending &&
         uiStore.canLoadHistory !== false
     ) {
         const firstMsgId = list[0].message_id
         const firstMsgTime = Number(list[0]?.time)
         const useMixedHistory = settingsStore.sysConfig.mixed_load_messages !== false
         uiStore.nowGetHistory = true
+        uiStore.historyRequestPending = true
         if (useMixedHistory && Number.isFinite(firstMsgTime)) {
             uiStore.historyBeforeTime = firstMsgTime
         } else {
@@ -2240,7 +2242,9 @@ function updateList(newLength: number, oldLength: number) {
                         scrollTo(newPan.scrollHeight, false)
                     }
                 }
-                uiStore.nowGetHistory = false
+                if (!uiStore.historyRequestPending) {
+                    uiStore.nowGetHistory = false
+                }
             }
 
             const getImgList = () => {
