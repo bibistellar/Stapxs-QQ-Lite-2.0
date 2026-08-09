@@ -1,285 +1,174 @@
 **中文 | [English](README_EN.md)**
 
-> <strong>// 小广告 //</strong><br />
-> 想在终端连接 Napcat？来看看 [Stapxs QQ Shell](https://github.com/Stapxs/Stapxs-QQ-Shell) 吧！<br />
----
-
 <p align="center">
-  <a href="https://blog.stapxs.cn" target="blank">
-    <img src="src/renderer/public/img/icons/icon.svg" alt="Logo" width="156" height="156">
-  </a>
-  <h2 align="center" style="font-weight: 600">Stapxs QQ Lite</h2>
- <p align="center">
-  <img src="README/gitcode.png" width="400">
- </p>
-  <p align="center">
-    一个兼容 OneBot 的非官方网页 QQ 客户端
-    <br />
-    <a href="https://bibistellar.github.io/Stapxs-QQ-Lite-2.0/" target="blank"><strong>🌎 访问 DEMO</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases" target="blank"><strong>📦️ 下载程序</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;
-    <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues/new" target="blank"><strong>💬 反馈问题</strong></a>
-    <br />
-    <br />
-    <strong>本网页应用仅供学习交流使用，请勿用于其他用途</strong><br>
-    <strong>版权争议请提出 issue 协商</strong>
-  </p>
+  <img src="src/renderer/public/img/icons/icon.svg" alt="Stapxs QQ Lite" width="144" height="144">
 </p>
 
-![view](README/view.png)
+<h1 align="center">Stapxs QQ Lite</h1>
 
-## ☕️ 赞助项目
 <p align="center">
-    <a href="https://www.ifdian.net/a/stapxs" target="_blank">
-    <img src="README/sponsor.png" width="600">
-    </a>
+  一个兼容 OneBot 11 协议的非官方 QQ 全平台客户端实现
 </p>
 
-## 社区版本
-以下是一些社区支持的版本，非常推荐大家试用：
-- [Stapxs QQ Lite X](https://github.com/Chzxxuanzheng/Stapxs-QQ-Lite-X)：扩展了更多功能的社区版本，支持更多接近原版 QQ 的功能
-- [Stapxs QQ Lite Pre Preview](https://github.com/dev-soragoto/Stapxs-QQ-Lite-2.0-pre-release)：Stapxs QQ Lite 的预览版本，跟随 dev 分支更新，可体验最新功能
+<p align="center">
+  <a href="https://bibistellar.github.io/Stapxs-QQ-Lite-2.0/">在线使用</a> ·
+  <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases">下载客户端</a> ·
+  <a href="https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues">问题反馈</a>
+</p>
 
-## ✨ 特性支持
+![应用界面](README/view.png)
 
-- ✅ 使用 Vue.js 全家桶开发，快乐前后端分离
-- 🎨 自适应布局，竖版也能使用
-- 🖥️ 支持 PWA（都有 Electron 了（小声））
-- 🌚 Light/Dark Mode 自动切换
-- 🍱 该有的都有（虽然比不过官方端）
-  - 复杂消息显示、转发、回复、撤回
-  - 群文件、群公告、群设置（一小部分）、精华消息
-  - 图片、收藏表情、文件发送
-- 📦️ 支持多种 bot，我就是要用！
-- 🔥 水深火热但是更好看的 Electron 客户端
-- 🥚 彩蛋！来更多的彩蛋！
-- 🛠 更多特性开发中
+> [!IMPORTANT]
+> 本项目不是腾讯 QQ 官方客户端，需要连接由用户自行部署的 OneBot 11 服务。使用非官方 QQ Bot 可能带来账号安全、数据与稳定性风险，请在使用前阅读 [免责声明](DISCLAIMER.md)。
 
-## ♿️ 快速使用
+## 项目简介
 
-### > 运行服务
+Stapxs QQ Lite 将 OneBot 11 服务提供的消息与账号能力呈现为图形化聊天客户端。核心界面使用 Vue 3 和 TypeScript 开发，同一套前端可运行于浏览器，并封装为多个平台的客户端。
 
-Stapxs QQ Lite 需要一个 QQ Bot 后端提供服务。由于 QQ Bot 的部署较为复杂，请移步 [Bot 适配情况](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/76) issue 查看目前支持的 Bot 并选择一个查阅其部署文档。
+当前源码包含以下运行形态：
 
-<img alt="image" src="https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/assets/42486439/c92ebf66-e11e-41bd-9faa-7399aac2d1a8">
+- Web 单页应用与 PWA
+- Electron 桌面客户端（Windows、macOS、Linux）
+- Tauri 2 桌面客户端
+- Capacitor 8 移动客户端（Android、iOS）
+- NapCat 插件构建
 
-### > 访问网页
+主要功能包括消息收发、回复、转发与撤回，图片、表情和文件发送，以及群文件、群公告、精华消息和部分群管理能力。具体功能是否可用还取决于所连接的 OneBot 实现及其扩展接口。
 
-本仓库开启了 GitHub Pages，所有向主分支提交的代码将会自动构建并发布。你可以直接访问 [🌎 这个页面](https://bibistellar.github.io/Stapxs-QQ-Lite-2.0) 来使用已构建并部署的在线版本。
+## 使用
 
-### > 安装客户端
+### 1. 准备 OneBot 服务
 
-除了直接使用本仓库的构建页面，你也可以下载使用 Electron 打包的功能**稍稍**更丰富的客户端版本，访问 [📦️ 这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 查看版本发布列表。
+先部署一个提供 OneBot 11 正向 WebSocket 接口的 QQ Bot。项目内置了针对以下实现的消息结构适配：
 
-你也可以使用包管理器来安装，这样可以更方便地更新 Stapxs QQ Lite 而无需每次都从 GitHub 手动下载，访问 [💬 这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/99) 查看目前支持的包管理器。
+- NapCat.Onebot（LLOneBot 使用同一映射）
+- Lagrange.OneBot
+- SnowLuma
 
-### > 在 Napcat 中安装
-Stapxs QQ Lite 也可以作为 Napcat 的插件运行，点击下面的快速安装按钮在 Napcat 插件商店中安装：
+其他兼容 OneBot 11 的实现也可以尝试连接，但扩展接口或消息字段的差异可能导致部分功能不可用。
 
-<a href="https://napneko.github.io/napcat-plugin-index?pluginId=napcat-plugin-ssqq" target="_blank">
-<img src="https://github.com/NapNeko/napcat-plugin-index/blob/pages/button.png?raw=true" alt="Logo" width="160">
-</a>
+### 2. 打开客户端并连接
 
-### > 自行部署网页
+可以直接使用[在线版](https://bibistellar.github.io/Stapxs-QQ-Lite-2.0/)，或从 [Releases](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 下载对应平台的客户端。
 
-Stapxs QQ Lite 在版本发布时会构建 Web 文件，你可以在 [📦️ 这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 找到它，通常命名为 `Stapxs.QQ.Lite-<版本>-web.zip`，下载后解压并放置到你的网页服务器中即可。
+在连接页填写 OneBot 正向 WebSocket 地址和访问密钥。地址支持完整的 `ws://` / `wss://` URL；未填写协议时，客户端会根据运行环境补全协议。访问密钥会以 `access_token` 查询参数发送。
 
-不会部署网页服务器？Stapxs QQ Lite 网页版已经发布到了 [npm](https://www.npmjs.com/package/ssqq-web)！你可以使用 npx 工具快速启动：
+浏览器的安全策略通常不允许 HTTPS 页面连接 `ws://` 地址。如果在线版无法连接局域网中的非加密 WebSocket，请改用 `wss://`、部署在相同安全环境中的 Web 版本，或使用桌面/移动客户端。
 
-``` bash
+### 3. 其他使用方式
+
+NapCat 用户可以安装 `napcat-plugin-ssqq`，相关源码与打包说明位于 [`ssqq.napcat-plugin`](ssqq.napcat-plugin/README.md)。
+
+发布版 Web 静态文件也可以放置在任意静态文件服务器中。仓库提供的 Docker 镜像使用 Nginx，并监听容器内的 `8080` 端口：
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/bibistellar/stapxs-qq-lite-2.0:latest
+```
+
+也可以使用 Web 快速启动包：
+
+```bash
 npx ssqq-web hostname=127.0.0.1 port=8081
 ```
 
-### > 使用 Docker 部署网页
+## 本地开发
 
-Stapxs QQ Lite 已经原生支持了 Docker 部署，使用命令
-``` bash
-docker pull ghcr.io/bibistellar/stapxs-qq-lite-2.0:latest
-```
-来拉取最新的镜像，如果您无法使用或者GHCR速度很慢，可以使用命令
-``` bash
-docker pull ghcr.nju.edu.cn/bibistellar/stapxs-qq-lite-2.0:latest
-```
-来从镜像站拉取镜像，使用时请将容器内的```8080```端口对外开放，```80```端口可以忽略。
-## 💬 提醒和问题
-以下是关于使用 QQ Bot 和第三方客户端的常见疑问，你也可以查看 [常见问题](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/issues/117) issue 获取更多使用和部署相关的问题解答。
+### 环境要求
 
-### > 我能使用其他 QQ HTTP Bot 吗
+- Node.js
+- Yarn 4（仓库声明的版本为 `4.12.0`）
+- 构建移动端时需要对应的 Android Studio / Xcode 环境
+- 构建 Tauri 时需要 Rust 与对应平台的系统依赖
 
-- 如果它兼容 [OneBot 11 协议](https://github.com/botuniverse/onebot-11)，你可以尝试连接，但由于消息体格式和接口扩展的差异，大部分情况下可能无法完全正常使用。
-  已兼容的 Bot 列表可以在 [这里](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0/wiki) 查看。
+克隆仓库时请同时获取子模块，然后安装锁定版本的依赖：
 
-### > 使用 Bot 是否有风险
-
-- 使用 QQ Bot 服务可能存在一定风险，此风险并非由 Stapxs QQ Lite 造成，而是使用 QQ Bot 服务本身的风险。请自行查阅你所使用的 QQ Bot 相关文档以了解风险信息。
-
-### > 我遇到了问题
-
-- 如果遇到任何问题，欢迎发起 [issue](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/issues) 询问！发现 BUG 或有优化建议也欢迎反馈。
-
-## 📦️ 构建应用
-
-为了规范对其他仓库的引用，Stapxs QQ Lite 仓库包含一些 Git 子模块，这意味着你需要在克隆仓库时包含子模块：
-
-``` bash
-git clone https://github.com/bibistellar/Stapxs-QQ-Lite-2.0.git --recursive
+```bash
+git clone --recursive https://github.com/bibistellar/Stapxs-QQ-Lite-2.0.git
+cd Stapxs-QQ-Lite-2.0
+yarn install --immutable
 ```
 
-如果你已经克隆了仓库，可以使用以下命令补全子模块：
+### 常用命令
 
-``` bash
-git submodule update --init
+| 命令 | 用途 | 主要输出 |
+| --- | --- | --- |
+| `yarn dev` | 启动 Web 开发服务器（默认端口 `8080`） | — |
+| `yarn preview` | 预览 Web 构建结果 | — |
+| `yarn build` | 构建 Web 应用 | `dist/` |
+| `yarn dev:electron` | 启动 Electron 开发环境 | — |
+| `yarn build:electron` | 构建并打包 Electron 客户端 | `dist_electron/` |
+| `yarn dev:tauri` | 启动 Tauri 开发环境 | — |
+| `yarn build:tauri` | 构建 Tauri 客户端 | `src/tauri/target/release/bundle/` |
+| `yarn dev:android` | 同步并运行 Android 应用 | — |
+| `yarn dev:ios` | 同步并运行 iOS 应用 | — |
+| `yarn open:android` | 构建前端并在 Android Studio 中打开项目 | — |
+| `yarn open:ios` | 构建前端并在 Xcode 中打开项目 | — |
+| `yarn build:android` | 构建 Android release APK | Android Gradle 输出目录 |
+| `yarn build:ios` | 构建并导出 iOS 应用 | `dist_capacitor/` |
+| `yarn build:napcat` | 生成 NapCat 专用 Web 构建 | `dist/` |
+| `yarn typecheck` | 执行 Vue/TypeScript 类型检查 | — |
+| `yarn test:connection` | 运行连接地址与连接健康检查测试 | — |
+| `yarn test:outgoing` | 运行消息发送测试 | — |
+| `yarn lint` | 执行 ESLint 并自动修复 | — |
+
+### 构建配置
+
+Vite 从仓库根目录读取环境变量。源码中使用的构建配置包括：
+
+| 变量 | 作用 |
+| --- | --- |
+| `VITE_APP_SSE_MODE` | 设为 `true` 后使用 HTTP API / SSE 固定连接模式 |
+| `VITE_APP_SSE_SUPPORT` | SSE 模式下是否启用事件推送 |
+| `VITE_APP_SSE_EVENT_ADDRESS` | SSE 事件接口地址 |
+| `VITE_APP_SSE_HTTP_ADDRESS` | OneBot HTTP API 基础地址 |
+| `VITE_LOCAL_FACE` | 是否把本地 QQ 表情资源复制进构建结果 |
+| `VITE_APP_AMAP_KEY`、`VITE_APP_AMAP_SECRET` | 位置消息使用的高德地图配置 |
+
+SSE 模式是构建时选项，不能在运行时切换。关闭 `VITE_APP_SSE_SUPPORT` 后客户端仍可调用 HTTP API，但无法收到新消息和通知等主动事件。
+
+不要提交包含访问密钥或第三方服务凭据的本地环境配置。
+
+### 平台说明
+
+- Electron 的入口位于 `src/electron`，预加载脚本位于 `src/preload`。打包目标由 `electron-builder.yml` 定义。
+- Tauri 2 工程位于 `src/tauri`。Tauri 应用通常需要在目标操作系统上构建。
+- Capacitor 工程位于 `src/mobile`。`capacitor.config.ts` 中的 Android 签名密码从运行环境读取；发布构建前需要自行准备有效签名配置。
+- `yarn build:ios` 会调用 `scripts/build-export-ipa.sh`，需要 macOS、Xcode 和可用的开发者签名环境。
+
+## 目录结构
+
+```text
+src/renderer/                       Vue 前端与静态资源
+src/electron/                       Electron 主进程
+src/preload/                        Electron preload 接口
+src/tauri/                          Tauri 2 桌面工程
+src/mobile/                         Capacitor Android / iOS 工程
+ssqq.capacitor-onebot-connector/    移动端 OneBot 原生连接插件
+ssqq.napcat-plugin/                 NapCat 插件封装
+ssqq.npx-web-quick-start/           npx Web 快速启动包
+tests/                              连接与消息发送测试
 ```
 
-在开始构建之前，请先安装依赖。请确保已安装 `yarn`：
+## 参与贡献
 
-``` bash
-# 安装依赖
-yarn install
+提交改动前建议至少运行与改动相关的检查：
+
+```bash
+yarn typecheck
+yarn test:connection
+yarn test:outgoing
 ```
 
-另外，Stapxs QQ Lite 使用了高德地图 API 来显示位置共享地图。`.env` 文件中提供了一个默认的高德地图 API Key，如果你打算自行部署，建议在 [这里](https://lbs.amap.com/dev/key/app) 申请属于你自己的 API Key 并替换默认值。
+`yarn lint` 带有自动修复参数，请在准备检查并保留其格式化结果时运行。
 
-我们强烈建议使用自己的 API Key，因为默认 Key 有使用次数限制。
+## 许可证
 
-### > 构建 Web 页面
+主项目采用 [GNU Affero General Public License v3.0](LICENSE)（AGPL-3.0-only）。子项目以各自目录中的许可证文件为准：
 
-Stapxs QQ Lite 是一个基于 Vue 的单页应用，如果你想自行部署到网页服务器需要进行构建。你也可以直接前往 [这里](https://github.com/bibistellar/Stapxs-QQ-Lite-2.0/releases) 下载预构建好的文件包。
+| 子项目 | 许可证 |
+| --- | --- |
+| `ssqq.capacitor-onebot-connector` | Apache-2.0 |
+| `ssqq.napcat-plugin` | MIT |
+| `ssqq.npx-web-quick-start` | AGPL-3.0 |
 
-以下是构建该项目的命令，构建结果将输出在 `dist` 目录下：
-
-``` bash
-# 运行本地调试
-yarn dev
-
-# 代码检查和自动格式化
-yarn lint
-
-# 构建应用
-yarn build
-```
-
-#### SSE 模式
-Stapxs QQ Lite 支持 SSE 模式。在此模式下，应用将以 HTTP SSE + HTTP API 的方式连接到 QQ Bot 后端，提供更快速和轻量化的连接；甚至可以直接禁用 SSE 通知推送，仅使用 HTTP API 进行通信。
-
-SSE 模式不支持动态切换，需要在构建前修改 `.env` 环境变量中 `VITE_APP_SSE` 开头的配置项来启用。启用 SSE 模式后，页面将无法使用其他连接模式。
-
-~~~ ini
-VITE_APP_SSE_MODE=true
-VITE_APP_SSE_SUPPORT=true
-VITE_APP_SSE_EVENT_ADDRESS=api/_events
-VITE_APP_SSE_HTTP_ADDRESS=api
-~~~
-`SSE_MODE` 指定了 SSE 模式的主开关；
-
-`SSE_SUPPORT` 指定了是否支持 SSE 事件推送。设为 false 时将仅使用 HTTP API 进行通信，这将无法接收 QQ Bot 的主动推送消息，导致以下功能缺失：
-- 无法接收新消息推送、通知推送
-- 聊天面板新消息不会自动更新，但仍可通过重新加载面板来获取新消息
-
-剩余两项指定了 SSE 模式的地址，可根据需求修改。
-
-### > 构建 Electron 客户端
-
-自 `2.3.0` 版本起，Stapxs QQ Lite 支持构建为 Electron 应用并提供部分平台特性功能，你也可以自行构建。
-
-> 如果 Electron CLI 无法找到 Python，可以将 `PYTHON_PATH` 导出到环境变量中，指向 Python 可执行文件路径。
-
-以下是构建 Electron 应用的命令，构建结果将输出在 `dist_electron/out` 目录下：
-
-``` bash
-# Electron 运行本地调试
-yarn dev:electron
-
-# Electron 构建应用
-yarn build:electron
-```
-
-### > 构建 Tauri 应用
-
-自 `3.2.0` 版本起，Stapxs QQ Lite 支持构建为 Tauri 应用并提供部分平台特性功能，你也可以自行构建。
-
-以下是构建 Tauri 应用的命令，构建结果将输出在 `src/tauri/target/release/bundle` 目录下：
-
-``` bash
-# Tauri 运行本地调试
-yarn dev:tauri
-
-# Tauri 构建应用
-yarn build:tauri
-
-# Tauri 构建指定架构
-yarn build:tauri -t x86_64-apple-darwin -b dmg
-
-# 查看支持的架构
-rustup target list
-```
-
-注意：Tauri 不支持跨平台构建，需要在对应平台上进行构建。
-
-### > 构建 Capacitor 应用
-自 `3.0.0` 版本起，Stapxs QQ Lite 支持通过 Capacitor 构建为移动端应用并提供部分平台特性功能，你也可以自行构建。
-
-#### Android
-> 如果 Capacitor CLI 无法找到 Android Studio 和 Android SDK，可以将 `CAPACITOR_ANDROID_STUDIO_PATH` 和 `ANDROID_HOME` 导出到环境变量中，它们分别指向 Android Studio 可执行文件路径和 Android SDK 路径。
-
-你可以使用 `yarn open:android` 打开 Android Studio，通过 Build -> Generate Signed Bundle or APK 来构建 APK 文件。
-
-你也可以直接使用 `yarn build:android` 构建 APK 文件。请检查并修改 `capacitor.config.ts` 文件中 `android.buildOptions` 的 keyStore 配置。
-
-构建结果将输出在 `src/mobile/android/app/build/outputs/apk/release` 目录下。
-
-#### iOS
-你可以使用 `yarn open:ios` 打开 Xcode，通过 Product -> Archive 来构建 IPA 文件。
-
-你也可以直接使用 `yarn build:ios` 构建 IPA 文件。此构建方式将执行 `scripts/build-export-ipa.sh` 脚本，构建将使用钥匙串中的默认开发者证书，请确保已配置开发者证书。
-
-Xcode 的构建结果将输出在 `src/mobile/ios/build` 目录下，脚本构建结果将输出在 `dist_capacitor` 目录下。
-
-### > 命令列表
-以下是本项目的完整命令列表，你可以使用这些命令来快速构建和调试 Stapxs QQ Lite。
-
-**命令格式为 `yarn <命令>`，其中 `<命令>` 为列表中的一个：**
-
-| 命令           | 描述                |
-| -------------- | ------------------ |
-| install        | 安装依赖            |
-| lint           | 代码检查和自动格式化  |
-| update:icon    | 更新移动端应用图标集  |
-| update:version | 更新移动端应用版本号  |
-| dev            | 网页调试            |
-| dev:electron   | Electron 调试      |
-| dev:tauri      | Tauri 调试          |
-| dev:ios        | iOS 调试           |
-| dev:android    | Android 调试        |
-| open:ios       | 在 Xcode 中打开项目  |
-| open:android   | 在 Android Studio 中打开项目  |
-| build          | 网页构建            |
-| build:electron | 构建当前平台的 Electron 应用    |
-| build:tauri    | 构建 Tauri 应用     |
-| build:ios      | 构建 iOS 应用       |
-| build:android  | 构建 Android 应用   |
-
-## 📜 子项目开源协议提醒
-本项目存在一些子项目，子项目开源协议依照子项目的声明为准：
-| 名称 | 简介 | 开源协议 |
-|------------|----------|----------|
-| capacitor-onebot-connector | 移动端功能 | Apache License 2.0 |
-| napcat-plugin | napcat 插件 | MIT License |
-| npx-web-quick-start | npx 快速部署功能 | AGPL-3.0 License |
-
-## 📜 额外依赖声明
-Stapxs QQ Lite 的 Tauri 版本使用了来自 [DeltaChat](https://github.com/deltachat/deltachat-desktop) 项目的 user-notify 代码，用于提供跨平台系统通知功能。由于这部分代码没有独立发布，我们将其源码复制到了 `src/tauri/crates/user-notify` 目录下。此部分代码已通过 .gitattributes 文件排除在语言统计之外。
-
-## 🎉 鸣谢
-
-感谢以下小伙伴在开发和文档中提供的支持 ——
-
-<a href="https://github.com/Logic-Accepted"><img src="https://avatars.githubusercontent.com/u/36406453?s=48&v=4"></a>
-<a href="https://github.com/doodlehuang"><img src="https://avatars.githubusercontent.com/u/25525621?s=48&v=4"></a>
-<a href="https://github.com/Chzxxuanzheng"><img src="https://avatars.githubusercontent.com/u/122149478?s=48&v=4"></a>
-
-## ⭐️ Star History
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=stapxs/Stapxs-QQ-Lite-2.0&type=date&theme=dark&legend=top-left" />
-  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=stapxs/Stapxs-QQ-Lite-2.0&type=date&legend=top-left" />
-  <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=stapxs/Stapxs-QQ-Lite-2.0&type=date&legend=top-left" />
-</picture>
+“QQ”及相关名称、图标与商标归其权利人所有。本项目与腾讯公司无关。
