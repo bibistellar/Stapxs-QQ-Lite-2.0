@@ -146,10 +146,13 @@ jobs:
       - name: Snapshot prepared workspace
         run: |
           set -euo pipefail
+          printf '%s\n' '**/__pycache__/' '*.py[cod]' > "$RUNNER_TEMP/ai-generated.exclude"
           git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" init -q
           git --git-dir="$RUNNER_TEMP/work-index" config user.name github-actions[bot]
           git --git-dir="$RUNNER_TEMP/work-index" config user.email \
             41898282+github-actions[bot]@users.noreply.github.com
+          git --git-dir="$RUNNER_TEMP/work-index" config core.excludesFile \
+            "$RUNNER_TEMP/ai-generated.exclude"
           git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
           git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
             commit -q -m baseline
