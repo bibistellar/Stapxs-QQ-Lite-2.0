@@ -79,6 +79,7 @@ npx ssqq-web hostname=127.0.0.1 port=8081
 - Yarn 4（仓库声明的版本为 `4.12.0`）
 - 构建移动端时需要对应的 Android Studio / Xcode 环境
 - 构建 Tauri 时需要 Rust 与对应平台的系统依赖
+- 构建 NapCat 插件时需要 `npm` 命令与系统 `zip` 工具
 
 克隆仓库时请同时获取子模块，然后安装锁定版本的依赖：
 
@@ -105,7 +106,7 @@ yarn install --immutable
 | `yarn open:ios` | 构建前端并在 Xcode 中打开项目 | — |
 | `yarn build:android` | 构建 Android release APK | Android Gradle 输出目录 |
 | `yarn build:ios` | 构建并导出 iOS 应用 | `dist_capacitor/` |
-| `yarn build:napcat` | 生成 NapCat 专用 Web 构建 | `dist/` |
+| `yarn build:napcat` | 构建 NapCat 专用 Web UI、复制到插件目录并打包插件 | `ssqq.napcat-plugin/napcat-plugin-ssqq.zip`（Web UI 同时写入 `dist/` 和 `ssqq.napcat-plugin/webui/dist/`） |
 | `yarn typecheck` | 执行 Vue/TypeScript 类型检查 | — |
 | `yarn test:connection` | 运行连接地址与连接健康检查测试 | — |
 | `yarn test:outgoing` | 运行消息发送测试 | — |
