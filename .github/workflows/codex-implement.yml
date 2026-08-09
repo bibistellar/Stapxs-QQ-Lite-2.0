@@ -49,12 +49,17 @@ jobs:
           INPUT_ITERATION: ${{ inputs.iteration }}
         run: |
           set -euo pipefail
-          test "$EVENT_ACTOR" = "$REPOSITORY_OWNER"
           issue_number=${EVENT_ISSUE:-$INPUT_ISSUE}
           iteration=${INPUT_ITERATION:-1}
           [[ "$issue_number" =~ ^[1-9][0-9]*$ ]]
           [[ "$iteration" =~ ^[1-3]$ ]]
           if [[ -n "$INPUT_PR" ]]; then [[ "$INPUT_PR" =~ ^[1-9][0-9]*$ ]]; fi
+          if [[ "$EVENT_ACTOR" = "github-actions[bot]" ]]; then
+            test -n "$INPUT_PR"
+            [[ "$iteration" =~ ^[2-3]$ ]]
+          else
+            test "$EVENT_ACTOR" = "$REPOSITORY_OWNER"
+          fi
           echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
           echo "pr_number=$INPUT_PR" >> "$GITHUB_OUTPUT"
           echo "iteration=$iteration" >> "$GITHUB_OUTPUT"
