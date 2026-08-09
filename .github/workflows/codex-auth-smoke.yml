@@ -1,0 +1,44 @@
+name: Codex Subscription Auth Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install pinned Codex CLI
+        run: npm install --global @openai/codex@0.147.0
+
+      - name: Restore ephemeral Codex authentication
+        shell: bash
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$CODEX_AUTH_JSON"
+          codex_home="$RUNNER_TEMP/codex-home"
+          install -d -m 700 "$codex_home"
+          install -m 600 /dev/null "$codex_home/auth.json"
+          printf '%s' "$CODEX_AUTH_JSON" > "$codex_home/auth.json"
+          echo "CODEX_HOME=$codex_home" >> "$GITHUB_ENV"
+
+      - name: Run a read-only non-interactive request
+        shell: bash
+        run: |
+          set -euo pipefail
+          empty_workspace="$RUNNER_TEMP/empty-workspace"
+          install -d -m 700 "$empty_workspace"
+          codex exec \
+            --ephemeral \
+            --ignore-user-config \
+            --skip-git-repo-check \
+            --sandbox read-only \
+            --output-last-message "$RUNNER_TEMP/result.txt" \
+            -C "$empty_workspace" \
+            'Reply with exactly: codex-auth-ok'
+          test "$(tr -d '\r\n' < "$RUNNER_TEMP/result.txt")" = "codex-auth-ok"
