@@ -122,9 +122,15 @@ jobs:
       - name: Prepare sanitized workspaces
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/baseline" "$RUNNER_TEMP/work"
-          tar -C "$RUNNER_TEMP/baseline" -xzf "$RUNNER_TEMP/input/source.tgz"
+          mkdir -p "$RUNNER_TEMP/work"
           tar -C "$RUNNER_TEMP/work" -xzf "$RUNNER_TEMP/input/source.tgz"
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" init -q
+          git --git-dir="$RUNNER_TEMP/work-index" config user.name github-actions[bot]
+          git --git-dir="$RUNNER_TEMP/work-index" config user.email \
+            41898282+github-actions[bot]@users.noreply.github.com
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
+            commit -q -m baseline
           cp "$RUNNER_TEMP/input/issue.json" "$RUNNER_TEMP/work/.ai-issue.json"
           cp "$RUNNER_TEMP/input/pr.json" "$RUNNER_TEMP/work/.ai-pr.json"
 
@@ -138,6 +144,13 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
           bwrap --version
           npm install --global @openai/codex@0.147.0
+
+      - name: Install project dependencies before authentication
+        working-directory: ${{ runner.temp }}/work
+        run: |
+          set -euo pipefail
+          corepack enable
+          yarn install --immutable
 
       - name: Restore ephemeral Codex authentication
         env:
@@ -166,8 +179,14 @@ jobs:
             -C "$RUNNER_TEMP/work" \
             "You are implementing a trusted maintainer-approved GitHub issue. Read AGENTS.md, .ai-issue.json, and .ai-pr.json. This is automated iteration $ITERATION. Make a focused implementation in this sanitized source tree and run safe relevant local tests. Never modify AGENTS.md, .github/workflows, credentials, secret manifests, cluster access, release permissions, or production deployment authorization. Do not use git, GitHub, the network, or files outside this workspace. Do not merely describe changes: edit the files. End with a concise summary and validation performed."
           rm -f "$RUNNER_TEMP/work/.ai-issue.json" "$RUNNER_TEMP/work/.ai-pr.json"
-          (cd "$RUNNER_TEMP" && diff -ruN baseline work > changes.patch) || status=$?
-          test "${status:-0}" -eq 1
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
+          if git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
+            diff --cached --quiet; then
+            echo "Codex did not produce any repository changes" >&2
+            exit 1
+          fi
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
+            diff --cached --binary --no-ext-diff > "$RUNNER_TEMP/changes.patch"
           "$RUNNER_TEMP/work/scripts/ai-pr/validate-change-scope.py" "$RUNNER_TEMP/changes.patch"
 
       - uses: actions/upload-artifact@v4
