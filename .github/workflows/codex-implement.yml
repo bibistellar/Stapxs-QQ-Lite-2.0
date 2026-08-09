@@ -124,15 +124,6 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/work"
           tar -C "$RUNNER_TEMP/work" -xzf "$RUNNER_TEMP/input/source.tgz"
-          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" init -q
-          git --git-dir="$RUNNER_TEMP/work-index" config user.name github-actions[bot]
-          git --git-dir="$RUNNER_TEMP/work-index" config user.email \
-            41898282+github-actions[bot]@users.noreply.github.com
-          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
-          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
-            commit -q -m baseline
-          cp "$RUNNER_TEMP/input/issue.json" "$RUNNER_TEMP/work/.ai-issue.json"
-          cp "$RUNNER_TEMP/input/pr.json" "$RUNNER_TEMP/work/.ai-pr.json"
 
       - name: Install pinned Codex CLI
         run: |
@@ -151,6 +142,19 @@ jobs:
           set -euo pipefail
           corepack enable
           yarn install --immutable
+
+      - name: Snapshot prepared workspace
+        run: |
+          set -euo pipefail
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" init -q
+          git --git-dir="$RUNNER_TEMP/work-index" config user.name github-actions[bot]
+          git --git-dir="$RUNNER_TEMP/work-index" config user.email \
+            41898282+github-actions[bot]@users.noreply.github.com
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
+          git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
+            commit -q -m baseline
+          cp "$RUNNER_TEMP/input/issue.json" "$RUNNER_TEMP/work/.ai-issue.json"
+          cp "$RUNNER_TEMP/input/pr.json" "$RUNNER_TEMP/work/.ai-pr.json"
 
       - name: Restore ephemeral Codex authentication
         env:
@@ -177,7 +181,7 @@ jobs:
             --sandbox workspace-write \
             --output-last-message "$RUNNER_TEMP/implementation.txt" \
             -C "$RUNNER_TEMP/work" \
-            "You are implementing a trusted maintainer-approved GitHub issue. Read AGENTS.md, .ai-issue.json, and .ai-pr.json. This is automated iteration $ITERATION. Make a focused implementation in this sanitized source tree and run safe relevant local tests. Never modify AGENTS.md, .github/workflows, credentials, secret manifests, cluster access, release permissions, or production deployment authorization. Do not use git, GitHub, the network, or files outside this workspace. Do not merely describe changes: edit the files. End with a concise summary and validation performed."
+            "You are implementing a trusted maintainer-approved GitHub issue. Read AGENTS.md, .ai-issue.json, and .ai-pr.json. This is automated iteration $ITERATION. Project dependencies are already installed; do not install or update them. Make a focused implementation in this sanitized source tree and run safe relevant local tests. Never modify AGENTS.md, .github/workflows, credentials, secret manifests, cluster access, release permissions, or production deployment authorization. Do not use git, GitHub, the network, or files outside this workspace. Do not merely describe changes: edit the files. End with a concise summary and validation performed."
           rm -f "$RUNNER_TEMP/work/.ai-issue.json" "$RUNNER_TEMP/work/.ai-pr.json"
           git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" add -A
           if git --git-dir="$RUNNER_TEMP/work-index" --work-tree="$RUNNER_TEMP/work" \
