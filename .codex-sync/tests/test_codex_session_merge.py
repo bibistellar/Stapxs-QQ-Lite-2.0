@@ -131,12 +131,12 @@ class StateSyncIntegrationTests(unittest.TestCase):
                 ["git", "-C", machine, "remote", "add", "origin", self.remote],
                 check=True,
             )
-            (machine / "scripts").mkdir()
+            (machine / ".codex-sync").mkdir()
             (machine / ".codex").mkdir()
-            shutil.copy2(SCRIPT, machine / "scripts" / SCRIPT.name)
+            shutil.copy2(SCRIPT, machine / ".codex-sync" / SCRIPT.name)
             shutil.copy2(
                 SCRIPT.with_name("codex-state-sync.sh"),
-                machine / "scripts" / "codex-state-sync.sh",
+                machine / ".codex-sync" / "codex-state-sync.sh",
             )
 
     def tearDown(self) -> None:
@@ -146,7 +146,7 @@ class StateSyncIntegrationTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["CODEX_HOME"] = str(machine / ".codex")
         result = subprocess.run(
-            [machine / "scripts" / "codex-state-sync.sh", action],
+            [machine / ".codex-sync" / "codex-state-sync.sh", action],
             cwd=machine,
             env=environment,
             check=True,

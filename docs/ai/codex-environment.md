@@ -34,6 +34,29 @@ system skills remain part of the CLI.
 Project hooks require one-time trust. Open `/hooks`, review `.codex/hooks.json`, trust the commands,
 exit, and restart Codex before model work. Changed definitions require review again.
 
+## File placement and shell requirements
+
+Codex-discovered configuration remains in `.codex/config.toml` and `.codex/hooks.json`. Direnv must
+remain at the repository root as `.envrc`. Implementation scripts and their tests are isolated from
+application scripts under `.codex-sync/`:
+
+```text
+.codex-sync/
+  codex-lifecycle-hook.py
+  codex-session-merge.py
+  codex-state-sync.sh
+  tests/
+```
+
+The sync command targets Bash 3.2+ on macOS and Linux and requires Git, Python 3.9+, and `rsync`.
+It uses `set -euo pipefail`, quotes repository paths, and resolves the Git root because hooks inherit
+the session working directory and may start below the repository root. Matching hooks can run
+concurrently, so the sync script serializes local work with a PID lock. Codex does not currently run
+command hooks asynchronously; the short lifecycle hook therefore starts the longer push as a
+detached Python subprocess. Native Windows needs a separate `commandWindows` implementation and
+equivalent sync dependencies; use WSL for the Bash version. After `.envrc` changes, review it and run
+`direnv allow` again.
+
 ## History synchronization
 
 The independent `codex-history` branch contains portable runtime state and has an orphan root, so
@@ -56,9 +79,9 @@ safe prefix continuation or are resolved manually.
 Inspect or retry synchronization without displaying transcript contents:
 
 ```zsh
-scripts/codex-state-sync.sh status
-scripts/codex-state-sync.sh pull
-scripts/codex-state-sync.sh push
+.codex-sync/codex-state-sync.sh status
+.codex-sync/codex-state-sync.sh pull
+.codex-sync/codex-state-sync.sh push
 ```
 
 `status` reports both `pending` hook events and isolated `conflicts`. A non-zero conflict count does

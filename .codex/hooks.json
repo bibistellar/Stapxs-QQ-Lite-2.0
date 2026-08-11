@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex-lifecycle-hook.py\"",
+            "command": "hook_root=\"$(git rev-parse --show-toplevel)\" || exit 0; hook_script=\"$hook_root/.codex-sync/codex-lifecycle-hook.py\"; if [ -f \"$hook_script\" ]; then python3 \"$hook_script\"; fi",
             "timeout": 10,
             "additionalContextLimit": 800,
             "statusMessage": "Verifying repository-local Codex isolation"
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex-lifecycle-hook.py\"",
+            "command": "hook_root=\"$(git rev-parse --show-toplevel)\" || exit 0; hook_script=\"$hook_root/.codex-sync/codex-lifecycle-hook.py\"; if [ -f \"$hook_script\" ]; then python3 \"$hook_script\"; fi",
             "timeout": 5,
             "statusMessage": "Queueing Codex history archival"
           }
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex-lifecycle-hook.py\"",
+            "command": "hook_root=\"$(git rev-parse --show-toplevel)\" || exit 0; hook_script=\"$hook_root/.codex-sync/codex-lifecycle-hook.py\"; if [ -f \"$hook_script\" ]; then python3 \"$hook_script\"; fi",
             "timeout": 3
           }
         ]

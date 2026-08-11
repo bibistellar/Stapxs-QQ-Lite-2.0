@@ -142,7 +142,7 @@ import_history() {
 
   rsync -a "$temporary/remote/state/" "$temporary/output/state/"
   local merge_result
-  merge_result="$(python3 "$repo_root/scripts/codex-session-merge.py" \
+  merge_result="$(python3 "$repo_root/.codex-sync/codex-session-merge.py" \
     --mode pull \
     --base "$temporary/base/state" \
     --remote "$temporary/remote/state" \
@@ -292,7 +292,7 @@ export_history() {
       --exclude='/archived_sessions/' \
       "$local_snapshot/" "$snapshot/state/"
     local merge_result
-    merge_result="$(python3 "$repo_root/scripts/codex-session-merge.py" \
+    merge_result="$(python3 "$repo_root/.codex-sync/codex-session-merge.py" \
       --mode push \
       --base "$temporary/base/state" \
       --remote "$temporary/remote/state" \

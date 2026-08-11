@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Three-way merge Codex rollout files without exposing transcript contents."""
+"""Three-way merge independent Codex rollout files without exposing contents."""
 
 from __future__ import annotations
 

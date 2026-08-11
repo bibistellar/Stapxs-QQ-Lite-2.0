@@ -116,7 +116,7 @@ def queue_snapshot(root: Path, event: dict[str, object]) -> None:
             pass
 
     subprocess.Popen(
-        [str(root / "scripts" / "codex-state-sync.sh"), "push", "--quiet"],
+        [str(root / ".codex-sync" / "codex-state-sync.sh"), "push", "--quiet"],
         cwd=root,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
