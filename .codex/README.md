@@ -3,11 +3,14 @@
 Direnv points both Codex state roots at this directory. Lifecycle hooks archive portable state to
 the independent `codex-history` branch.
 
-The main branch tracks only stable files here:
+Codex discovers configuration from this directory, so the main branch tracks only stable config
+files here:
 
 - `README.md`
 - `config.toml`
 - `hooks.json`
+
+Synchronization implementation and tests live separately under the root `.codex-sync/` directory.
 
 Authentication stays machine-local. Session rollout files are reconciled independently, while
 SQLite state, memories, history, skills, and plugins remain part of the portable snapshot. A
