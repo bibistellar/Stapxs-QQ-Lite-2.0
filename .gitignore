@@ -14,3 +14,11 @@ notice_local.json
 *.tsbuildinfo
 .npmrc
 *.log*
+
+# BEGIN codex-repo-portability
+# Codex runtime belongs on the independent history branch, not the main branch.
+/.codex/*
+!/.codex/README.md
+!/.codex/config.toml
+!/.codex/hooks.json
+# END codex-repo-portability

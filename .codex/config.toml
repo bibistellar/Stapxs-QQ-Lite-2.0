@@ -1,0 +1,9 @@
+[features]
+hooks = true
+memories = true
+
+[history]
+persistence = "save-all"
+
+[tui]
+resume_cwd = "current"
