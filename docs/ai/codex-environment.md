@@ -40,9 +40,18 @@ The independent `codex-history` branch contains portable runtime state and has a
 its commits never enter main history. Authentication, logs, caches, temporary files, model metadata,
 and shell snapshots are excluded.
 
-Directory entry imports a newer remote snapshot before Codex starts. Each main-thread `Stop` queues
-an asynchronous snapshot; `SessionEnd` is a fallback. Pending local state prevents import, and push
-refuses to overwrite a newer remote head. Repository visibility does not block synchronization.
+Directory entry reconciles remote session files before Codex starts. Each main-thread `Stop` queues
+an asynchronous snapshot; `SessionEnd` is a fallback. Rollout files use a three-way comparison with
+the last imported commit. Equal files and prefix-only continuations merge automatically. If the same
+session diverged on two machines, only that rollout is kept local and recorded under the ignored
+`.codex/.state-sync/conflicts/` directory; unrelated sessions continue to pull and push. Pushes use a
+remote-head lease and retry when another machine wins the race. Repository visibility does not block
+synchronization.
+
+Portable non-session state remains snapshot-based. When a session snapshot is pending, pull leaves
+that global state local but still reconciles independent rollout files. A successful push clears the
+event queue; unresolved rollout conflicts remain visible in `status` until their contents become a
+safe prefix continuation or are resolved manually.
 
 Inspect or retry synchronization without displaying transcript contents:
 
@@ -51,6 +60,9 @@ scripts/codex-state-sync.sh status
 scripts/codex-state-sync.sh pull
 scripts/codex-state-sync.sh push
 ```
+
+`status` reports both `pending` hook events and isolated `conflicts`. A non-zero conflict count does
+not block new sessions.
 
 Messages are stored in ignored `.codex/.state-sync/sync.log`. A public repository also exposes the
 history branch, which may contain sensitive transcripts and SQLite state; choose visibility according

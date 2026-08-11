@@ -9,6 +9,8 @@ The main branch tracks only stable files here:
 - `config.toml`
 - `hooks.json`
 
-Authentication stays machine-local. Sessions, SQLite state, memories, history, skills, and plugins
-are synchronized by `scripts/codex-state-sync.sh`; logs, caches, temporary files, model metadata,
-and shell snapshots are excluded. See `docs/ai/codex-environment.md` for setup and recovery.
+Authentication stays machine-local. Session rollout files are reconciled independently, while
+SQLite state, memories, history, skills, and plugins remain part of the portable snapshot. A
+divergent session is isolated without blocking unrelated sessions. Logs, caches, temporary files,
+model metadata, and shell snapshots are excluded. See `docs/ai/codex-environment.md` for setup and
+recovery.
